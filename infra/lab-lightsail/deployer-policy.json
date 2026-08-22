@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DenyCloudFormationOutsideSeoul",
+      "Sid": "DenyCfnGeo",
       "Effect": "Deny",
       "Action": "cloudformation:*",
       "Resource": "*",
@@ -13,7 +13,7 @@
       }
     },
     {
-      "Sid": "DenyLightsailOutsideApprovedConsoleRegions",
+      "Sid": "DenyLsGeo",
       "Effect": "Deny",
       "Action": "lightsail:*",
       "Resource": "*",
@@ -27,7 +27,6 @@
       }
     },
     {
-      "Sid": "DenyStackUpdatesChangeSetsAndStackSets",
       "Effect": "Deny",
       "Action": [
         "cloudformation:CancelUpdateStack",
@@ -43,7 +42,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "ReadCloudFormationCatalogInSeoul",
       "Effect": "Allow",
       "Action": [
         "cloudformation:ListStacks",
@@ -57,7 +55,6 @@
       }
     },
     {
-      "Sid": "CreateOnlyTheFixedQFieldCloudLabStack",
       "Effect": "Allow",
       "Action": "cloudformation:CreateStack",
       "Resource": "arn:aws:cloudformation:ap-northeast-2:*:stack/qfieldcloud-lab-pilot/*",
@@ -82,7 +79,6 @@
       }
     },
     {
-      "Sid": "ReadOnlyTheFixedQFieldCloudLabStack",
       "Effect": "Allow",
       "Action": [
         "cloudformation:DescribeStackEvents",
@@ -100,7 +96,7 @@
       }
     },
     {
-      "Sid": "ReadLightsailDeploymentStateInSeoul",
+      "Sid": "ReadLsSeoul",
       "Effect": "Allow",
       "Action": [
         "lightsail:GetAlarms",
@@ -125,7 +121,7 @@
       }
     },
     {
-      "Sid": "ReadLightsailDistributionMetadataForConsoleInVirginia",
+      "Sid": "ReadLsCdn",
       "Effect": "Allow",
       "Action": "lightsail:GetDistributions",
       "Resource": "*",
@@ -136,7 +132,6 @@
       }
     },
     {
-      "Sid": "CreateOnlyTaggedLightsailInstancesInSeoul",
       "Effect": "Allow",
       "Action": "lightsail:CreateInstances",
       "Resource": "*",
@@ -154,7 +149,6 @@
       }
     },
     {
-      "Sid": "TagLightsailResourcesOnlyViaCloudFormation",
       "Effect": "Allow",
       "Action": "lightsail:TagResource",
       "Resource": [
@@ -172,7 +166,7 @@
       }
     },
     {
-      "Sid": "ManageTaggedPilotInstancesOnlyViaCloudFormation",
+      "Sid": "ManageVm",
       "Effect": "Allow",
       "Action": [
         "lightsail:DeleteInstance",
@@ -193,7 +187,7 @@
       }
     },
     {
-      "Sid": "OperateOnlyTaggedQFieldCloudLabInstances",
+      "Sid": "OperateVm",
       "Effect": "Allow",
       "Action": [
         "lightsail:GetInstanceAccessDetails",
@@ -213,7 +207,6 @@
       }
     },
     {
-      "Sid": "AttachPilotStaticIpToTaggedInstanceViaCloudFormation",
       "Effect": "Allow",
       "Action": "lightsail:AttachStaticIp",
       "Resource": "arn:aws:lightsail:ap-northeast-2:*:Instance/*",
@@ -231,7 +224,6 @@
       }
     },
     {
-      "Sid": "AttachPilotStaticIpResourceViaCloudFormation",
       "Effect": "Allow",
       "Action": "lightsail:AttachStaticIp",
       "Resource": "arn:aws:lightsail:ap-northeast-2:*:StaticIp/*",
@@ -245,7 +237,6 @@
       }
     },
     {
-      "Sid": "AllocatePilotStaticIpAndManageAddOnViaCloudFormation",
       "Effect": "Allow",
       "Action": [
         "lightsail:AllocateStaticIp",
@@ -263,7 +254,6 @@
       }
     },
     {
-      "Sid": "DetachAndReleasePilotStaticIpsViaCloudFormation",
       "Effect": "Allow",
       "Action": [
         "lightsail:DetachStaticIp",
@@ -280,7 +270,6 @@
       }
     },
     {
-      "Sid": "CreateAndDeletePilotAlarmsViaCloudFormation",
       "Effect": "Allow",
       "Action": [
         "lightsail:DeleteAlarm",

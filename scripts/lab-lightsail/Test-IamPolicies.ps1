@@ -36,6 +36,22 @@ function Get-AllowStatementsForAction {
     )
 }
 
+function Get-StatementsBySid {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Policy,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Sid
+    )
+
+    return @(
+        $Policy.Statement | Where-Object {
+            $_.PSObject.Properties.Name -contains 'Sid' -and $_.Sid -eq $Sid
+        }
+    )
+}
+
 function Test-ExactSet {
     param(
         [Parameter(Mandatory = $true)]
@@ -74,7 +90,8 @@ $templatePath = Join-Path $repositoryRoot 'infra/lab-lightsail/template.yaml'
 $deployScriptPath = Join-Path $PSScriptRoot 'Deploy-QFieldCloudPilot.ps1'
 $testScriptPath = Join-Path $PSScriptRoot 'Test-QFieldCloudPilot.ps1'
 
-$deployer = Get-Content -Raw -LiteralPath $deployerPath | ConvertFrom-Json -Depth 100
+$deployerText = Get-Content -Raw -LiteralPath $deployerPath
+$deployer = $deployerText | ConvertFrom-Json -Depth 100
 $cleanup = Get-Content -Raw -LiteralPath $cleanupPath | ConvertFrom-Json -Depth 100
 
 $allowedResourceTypes = @(
@@ -140,14 +157,16 @@ $cloudFormationAllowActions = @($allAllowActions | Where-Object { $_ -like 'clou
 $lightsailAllowActions = @($allAllowActions | Where-Object { $_ -like 'lightsail:*' })
 Assert-Contract (Test-ExactSet -Actual $cloudFormationAllowActions -Expected $expectedCloudFormationAllowActions) '배포 정책에 예상 밖 CloudFormation Allow가 있거나 필수 Allow가 없습니다.'
 Assert-Contract (Test-ExactSet -Actual $lightsailAllowActions -Expected $expectedLightsailAllowActions) '배포 정책에 예상 밖 Lightsail Allow가 있거나 필수 Allow가 없습니다.'
+Assert-Contract (([regex]::Replace($deployerText, '\s+', '')).Length -le 6144) '배포 정책이 IAM 고객 관리형 정책의 6,144자 제한을 초과합니다.'
+Assert-Contract (([regex]::Replace($deployerText, '\s+', '')).Length -le 6000) '배포 정책이 향후 안전한 수정을 위한 144자 여유를 남기지 않습니다.'
 
-$cloudFormationRegionDeny = @($deployer.Statement | Where-Object { $_.Sid -eq 'DenyCloudFormationOutsideSeoul' })
+$cloudFormationRegionDeny = @(Get-StatementsBySid -Policy $deployer -Sid 'DenyCfnGeo')
 Assert-Contract ($cloudFormationRegionDeny.Count -eq 1) '서울 밖 CloudFormation Deny가 정확히 하나여야 합니다.'
 Assert-Contract ($cloudFormationRegionDeny[0].Action -eq 'cloudformation:*') '서울 밖 CloudFormation Deny 작업이 다릅니다.'
 Assert-Contract ($cloudFormationRegionDeny[0].Resource -eq '*') '서울 밖 CloudFormation Deny 범위가 다릅니다.'
 Assert-Contract ($cloudFormationRegionDeny[0].Condition.StringNotEquals.'aws:RequestedRegion' -eq 'ap-northeast-2') 'CloudFormation 허용 리전은 서울뿐이어야 합니다.'
 
-$lightsailRegionDeny = @($deployer.Statement | Where-Object { $_.Sid -eq 'DenyLightsailOutsideApprovedConsoleRegions' })
+$lightsailRegionDeny = @(Get-StatementsBySid -Policy $deployer -Sid 'DenyLsGeo')
 Assert-Contract ($lightsailRegionDeny.Count -eq 1) '승인 리전 밖 Lightsail Deny가 정확히 하나여야 합니다.'
 Assert-Contract ($lightsailRegionDeny[0].Action -eq 'lightsail:*') '승인 리전 밖 Lightsail Deny 작업이 다릅니다.'
 Assert-Contract ($lightsailRegionDeny[0].Resource -eq '*') '승인 리전 밖 Lightsail Deny 범위가 다릅니다.'
@@ -168,13 +187,13 @@ $seoulReadActions = @(
     'lightsail:GetStaticIp'
     'lightsail:GetStaticIps'
 )
-$seoulReadStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'ReadLightsailDeploymentStateInSeoul' })
+$seoulReadStatement = @(Get-StatementsBySid -Policy $deployer -Sid 'ReadLsSeoul')
 Assert-Contract ($seoulReadStatement.Count -eq 1) '서울 Lightsail 조회 statement가 정확히 하나여야 합니다.'
 Assert-Contract (Test-ExactSet -Actual @($seoulReadStatement[0].Action) -Expected $seoulReadActions) '서울 Lightsail 조회 작업 목록이 다릅니다.'
 Assert-Contract ($seoulReadStatement[0].Resource -eq '*') '서울 Lightsail 목록 조회는 AWS가 요구하는 별표 범위여야 합니다.'
 Assert-Contract ($seoulReadStatement[0].Condition.StringEquals.'aws:RequestedRegion' -eq 'ap-northeast-2') '서울 Lightsail 조회 리전이 다릅니다.'
 
-$distributionReadStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'ReadLightsailDistributionMetadataForConsoleInVirginia' })
+$distributionReadStatement = @(Get-StatementsBySid -Policy $deployer -Sid 'ReadLsCdn')
 Assert-Contract ($distributionReadStatement.Count -eq 1) '버지니아 CDN 조회 statement가 정확히 하나여야 합니다.'
 Assert-Contract ($distributionReadStatement[0].Action -eq 'lightsail:GetDistributions') '버지니아에서는 CDN 목록 조회만 허용해야 합니다.'
 Assert-Contract ($distributionReadStatement[0].Resource -eq '*') 'CDN 목록 조회는 AWS가 요구하는 별표 범위여야 합니다.'
@@ -198,7 +217,7 @@ Assert-Contract ($createTags.'aws:RequestTag/DeploymentProfile' -eq 'lab-lightsa
 Assert-Contract ($createTags.'aws:RequestTag/ManagedBy' -eq 'CloudFormation') 'CreateInstances ManagedBy 태그가 다릅니다.'
 Assert-Contract ($createTags.'aws:RequestTag/CloudFormationStack' -eq 'qfieldcloud-lab-pilot') 'CreateInstances CloudFormationStack 태그가 다릅니다.'
 
-$managedInstanceStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'ManageTaggedPilotInstancesOnlyViaCloudFormation' })
+$managedInstanceStatement = @(Get-StatementsBySid -Policy $deployer -Sid 'ManageVm')
 Assert-Contract ($managedInstanceStatement.Count -eq 1) 'CloudFormation 인스턴스 관리 statement가 정확히 하나여야 합니다.'
 Assert-Contract (Test-ExactSet -Actual @($managedInstanceStatement[0].Action) -Expected @('lightsail:DeleteInstance', 'lightsail:PutInstancePublicPorts')) 'CloudFormation 인스턴스 관리 작업 목록이 다릅니다.'
 Assert-Contract (Test-PilotResourceTags -Statement $managedInstanceStatement[0]) 'CloudFormation 인스턴스 관리 태그 조건이 다릅니다.'
@@ -217,7 +236,7 @@ $directActions = @(
     'lightsail:StartInstance'
     'lightsail:StopInstance'
 )
-$directStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'OperateOnlyTaggedQFieldCloudLabInstances' })
+$directStatement = @(Get-StatementsBySid -Policy $deployer -Sid 'OperateVm')
 Assert-Contract ($directStatement.Count -eq 1) '직접 운영 권한 statement가 정확히 하나여야 합니다.'
 Assert-Contract (Test-ExactSet -Actual @($directStatement[0].Action) -Expected $directActions) '직접 운영 권한은 SSH·시작·중지·재시작만 허용해야 합니다.'
 Assert-Contract (Test-PilotResourceTags -Statement $directStatement[0]) '직접 운영 권한의 파일럿 태그 조건이 다릅니다.'
