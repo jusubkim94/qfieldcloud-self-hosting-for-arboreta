@@ -1,4 +1,6 @@
-# 상태확인 실행서 설계
+# 상태확인 실행서
+
+현재 `lab-lightsail`의 정확한 명령과 필드 설명은 [파일럿 안내서](../lab-lightsail.md#6-상태와-관리자-계정-확인)를 따릅니다.
 
 ## 검사 계층
 
@@ -16,9 +18,9 @@
 
 | 수준 | 의미 |
 |---|---|
-| 정상 | 모든 필수 계층과 worker 시험 정상 |
+| 정상 | 설치 tuple, 필수 계층, 7일 이내 worker·최신 로컬 백업·그 백업의 격리 무결성 시험 정상 |
 | 부분 장애 | 웹은 열리지만 DB, storage, worker 또는 백업 검사 실패 |
 | 장애 | HTTPS 또는 핵심 API 사용 불가 |
 | 미검증 | 실제 검사를 실행하지 않음 |
 
-오류 출력에는 Secret 값을 포함하지 않습니다. 이 Phase에서는 검사 명령이나 상태 도구를 구현하지 않았습니다.
+오류 출력에는 Secret 값을 포함하지 않습니다. 서버에서는 `sudo /opt/qfieldcloud/bin/health-check.sh`, 로컬에서는 검토한 commit과 `bootstrap.sh` SHA-256을 함께 지정해 `Test-QFieldCloudPilot.ps1 -StackName qfieldcloud-lab-pilot`을 사용합니다. 서버 상태 도구는 설치 commit의 파일 일치, 고정 이미지 객체, 실제 PROJ-data 격자, 고정 인증서 지문, 남은 복원시험 임시 자원, 모든 장기 실행 컨테이너와 worker·백업·복원시험까지 확인합니다. 외부 상태 주소만 정상인 경우 전체 성공으로 판정하지 않습니다.

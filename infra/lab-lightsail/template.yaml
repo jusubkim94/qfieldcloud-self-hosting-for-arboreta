@@ -1,0 +1,581 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Unofficial QFieldCloud lab pilot on one Amazon Lightsail instance in Seoul.
+  Creates a 4 GB instance, static IP, restricted firewall, optional automatic
+  snapshots, and optional Lightsail alarms. No secret value is accepted here.
+
+Metadata:
+  cfn-lint:
+    config:
+      # AWS documents WaitCondition.Data as a valid Output even though it is a
+      # JSON name/value object; cfn-lint 1.55.1 models every Output as a string.
+      ignore_checks:
+        - E6101
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Seoul deployment
+        Parameters:
+          - DeploymentRegion
+          - AvailabilityZone
+          - InstanceName
+          - BlueprintId
+          - BundleId
+      - Label:
+          default: Pinned bootstrap source
+        Parameters:
+          - RepositoryOwner
+          - RepositoryName
+          - BootstrapPath
+          - BootstrapRevision
+          - BootstrapSha256
+      - Label:
+          default: Recovery and monitoring
+        Parameters:
+          - EnableAutomaticSnapshots
+          - AutomaticSnapshotTimeUtc
+          - EnableAlarms
+          - CpuAlarmThresholdPercent
+          - SshAccessMode
+    ParameterLabels:
+      DeploymentRegion:
+        default: AWS Region (must match the console Region)
+      AvailabilityZone:
+        default: Lightsail Availability Zone
+      InstanceName:
+        default: Lightsail instance name
+      BlueprintId:
+        default: Ubuntu 24.04 blueprint ID
+      BundleId:
+        default: 4 GB Lightsail bundle ID
+      RepositoryOwner:
+        default: GitHub repository owner
+      RepositoryName:
+        default: GitHub repository name
+      BootstrapPath:
+        default: Bootstrap path in the repository
+      BootstrapRevision:
+        default: Pinned repository commit (40 hexadecimal characters)
+      BootstrapSha256:
+        default: Bootstrap file SHA-256 (64 hexadecimal characters)
+      EnableAutomaticSnapshots:
+        default: Enable daily automatic snapshots
+      AutomaticSnapshotTimeUtc:
+        default: Daily snapshot start time (UTC)
+      EnableAlarms:
+        default: Create status-check and CPU alarms
+      CpuAlarmThresholdPercent:
+        default: High CPU threshold (%)
+      SshAccessMode:
+        default: Port 22 access
+  Project:
+    Name: qfieldcloud-self-hosting-for-arboreta
+    Profile: lab-lightsail
+    OfficialProject: false
+  SecurityNotes:
+    - This template has no password, token, access key, private key, or dynamic secret reference.
+    - Port 22 is restricted to the AWS-managed lightsail-connect browser SSH alias.
+    - UserData downloads a file first, verifies SHA-256, and only then executes it.
+    - Bootstrap output is written to a root-only file instead of the CloudFormation output.
+    - A stack-local wait handle gates completion and is never emitted as an output or log value.
+  UpdateNotes:
+    - This pilot installer supports creating a new stack only; its deployment script rejects an existing stack name.
+    - In-place changes to Lightsail instance properties are not a supported update path for this pilot.
+    - Create a reviewed replacement stack only after backing up data and approving the added cost.
+
+Parameters:
+  DeploymentRegion:
+    Type: String
+    Default: ap-northeast-2
+    AllowedValues:
+      - ap-northeast-2
+    Description: >-
+      Informational safety input. Select Asia Pacific (Seoul), ap-northeast-2,
+      in the CloudFormation console before creating the stack.
+
+  AvailabilityZone:
+    Type: String
+    Default: ap-northeast-2a
+    AllowedPattern: '^ap-northeast-2[a-d]$'
+    ConstraintDescription: Use a Seoul Availability Zone such as ap-northeast-2a.
+    Description: >-
+      Lightsail Availability Zone. Availability still needs a deployment-time
+      preflight check because service capacity can change.
+
+  InstanceName:
+    Type: String
+    Default: qfieldcloud-lab-pilot
+    MinLength: 3
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9]$'
+    ConstraintDescription: >-
+      Use 3-64 letters, numbers, dots, underscores, or hyphens; start and end
+      with a letter or number.
+    Description: >-
+      Physical name for a new create-only pilot stack. It must not already be
+      in use; this installer does not update or replace an existing instance.
+
+  BlueprintId:
+    Type: String
+    Default: ubuntu_24_04
+    AllowedValues:
+      - ubuntu_24_04
+    Description: >-
+      AWS Lightsail Ubuntu 24.04 blueprint identifier. The deployment preflight
+      must confirm this identifier is active in ap-northeast-2.
+
+  BundleId:
+    Type: String
+    Default: medium_3_0
+    AllowedValues:
+      - medium_3_0
+    Description: Lightsail Linux bundle with 4 GB RAM for the lab pilot.
+
+  RepositoryOwner:
+    Type: String
+    Default: jusubkim94
+    MinLength: 1
+    MaxLength: 39
+    AllowedPattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$'
+    ConstraintDescription: Use a valid GitHub owner name without a URL or slash.
+    Description: Public GitHub owner hosting the pinned bootstrap revision.
+
+  RepositoryName:
+    Type: String
+    Default: qfieldcloud-self-hosting-for-arboreta
+    MinLength: 1
+    MaxLength: 100
+    AllowedPattern: '^[A-Za-z0-9._-]+$'
+    ConstraintDescription: Use a GitHub repository name without a URL or slash.
+    Description: Public GitHub repository hosting the pinned bootstrap revision.
+
+  BootstrapPath:
+    Type: String
+    Default: scripts/lab-lightsail/bootstrap.sh
+    AllowedValues:
+      - scripts/lab-lightsail/bootstrap.sh
+    Description: Fixed repository-relative bootstrap path; parent traversal is not allowed.
+
+  BootstrapRevision:
+    Type: String
+    MinLength: 40
+    MaxLength: 40
+    AllowedPattern: '^[0-9a-f]{40}$'
+    ConstraintDescription: Enter a full lowercase 40-character Git commit SHA.
+    Description: >-
+      Required immutable Git commit. Branch names and moving tags are rejected.
+      This value is public provenance, not a secret.
+
+  BootstrapSha256:
+    Type: String
+    MinLength: 64
+    MaxLength: 64
+    AllowedPattern: '^[0-9a-f]{64}$'
+    ConstraintDescription: Enter a lowercase 64-character SHA-256 checksum.
+    Description: >-
+      Required SHA-256 of BootstrapPath at BootstrapRevision. UserData exits
+      without executing the file when this value does not match.
+
+  EnableAutomaticSnapshots:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Enables Lightsail daily automatic snapshots. Snapshots add storage cost
+      and can remain billable after this setting is disabled.
+
+  AutomaticSnapshotTimeUtc:
+    Type: String
+    Default: '18:00'
+    AllowedPattern: '^(?:[01][0-9]|2[0-3]):00$'
+    ConstraintDescription: Use an hourly UTC value from 00:00 through 23:00.
+    Description: >-
+      Daily automatic snapshot start time in UTC. 18:00 UTC is 03:00 Korea
+      Standard Time on the following calendar day.
+
+  EnableAlarms:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Creates Lightsail StatusCheckFailed and CPUUtilization alarms. Alarm
+      notifications remain disabled until a verified contact is configured.
+
+  CpuAlarmThresholdPercent:
+    Type: Number
+    Default: 80
+    MinValue: 1
+    MaxValue: 100
+    Description: CPU utilization percentage that triggers the high CPU alarm.
+
+  SshAccessMode:
+    Type: String
+    Default: lightsail-connect
+    AllowedValues:
+      - lightsail-connect
+    Description: >-
+      Allows port 22 only from the AWS-managed browser SSH alias. The pilot
+      requires this recovery path because initial credentials stay on the server.
+
+Rules:
+  SeoulRegionMustMatch:
+    Assertions:
+      - Assert: !Equals
+          - !Ref DeploymentRegion
+          - !Ref 'AWS::Region'
+        AssertDescription: >-
+          Open CloudFormation in Asia Pacific (Seoul), ap-northeast-2. Changing
+          the DeploymentRegion field does not change the console Region.
+
+  BootstrapInputsMustBePinned:
+    Assertions:
+      - Assert: !Not
+          - !Equals
+            - !Ref BootstrapRevision
+            - '0000000000000000000000000000000000000000'
+        AssertDescription: Replace the all-zero placeholder with a verified Git commit SHA.
+      - Assert: !Not
+          - !Equals
+            - !Ref BootstrapSha256
+            - '0000000000000000000000000000000000000000000000000000000000000000'
+        AssertDescription: Replace the all-zero placeholder with the verified file SHA-256.
+
+Conditions:
+  AutomaticSnapshotsEnabled: !Equals [!Ref EnableAutomaticSnapshots, 'true']
+  AlarmsEnabled: !Equals [!Ref EnableAlarms, 'true']
+
+Resources:
+  BootstrapWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  LightsailInstance:
+    Type: AWS::Lightsail::Instance
+    Properties:
+      InstanceName: !Ref InstanceName
+      AvailabilityZone: !Ref AvailabilityZone
+      BlueprintId: !Ref BlueprintId
+      BundleId: !Ref BundleId
+      AddOns: !If
+        - AutomaticSnapshotsEnabled
+        - - AddOnType: AutoSnapshot
+            AutoSnapshotAddOnRequest:
+              SnapshotTimeOfDay: !Ref AutomaticSnapshotTimeUtc
+        - !Ref 'AWS::NoValue'
+      Networking:
+        Ports:
+          - FromPort: 80
+            ToPort: 80
+            Protocol: tcp
+            Cidrs:
+              - 0.0.0.0/0
+            Ipv6Cidrs:
+              - '::/0'
+          - FromPort: 443
+            ToPort: 443
+            Protocol: tcp
+            Cidrs:
+              - 0.0.0.0/0
+            Ipv6Cidrs:
+              - '::/0'
+          - FromPort: 22
+            ToPort: 22
+            Protocol: tcp
+            CidrListAliases:
+              - lightsail-connect
+      Tags:
+        - Key: Project
+          Value: qfieldcloud-self-hosting
+        - Key: DeploymentProfile
+          Value: lab-lightsail
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: CloudFormationStack
+          Value: !Ref 'AWS::StackName'
+      UserData: !Sub |
+        #!/usr/bin/env bash
+        set -Eeuo pipefail
+        set +x
+        umask 077
+
+        readonly state_dir='/var/lib/qfieldcloud-bootstrap'
+        readonly install_root='/opt/qfieldcloud'
+        readonly repository_url='https://github.com/${RepositoryOwner}/${RepositoryName}.git'
+        readonly revision='${BootstrapRevision}'
+        readonly expected_sha256='${BootstrapSha256}'
+        readonly raw_url='https://raw.githubusercontent.com/${RepositoryOwner}/${RepositoryName}/${BootstrapRevision}/${BootstrapPath}'
+        readonly bootstrap_file="$state_dir/bootstrap.sh"
+        readonly bootstrap_log="$state_dir/bootstrap.log"
+        readonly bootstrap_timeout_seconds='4800'
+        readonly certificate_fingerprint_file="$install_root/state/certificate-sha256"
+        readonly wait_handle='${BootstrapWaitHandle}'
+        download_path=''
+
+        signal_bootstrap() {
+          status="$1"
+          reason="$2"
+          data="$3"
+          if [ "$status" = 'SUCCESS' ]; then
+            if ! [[ "$data" =~ ^[0-9a-f]{64}$ ]]; then
+              return 1
+            fi
+          else
+            data='failed'
+          fi
+          if command -v curl >/dev/null 2>&1; then
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --retry 5 \
+              --retry-max-time 180 \
+              --retry-all-errors \
+              --request PUT \
+              --header 'Content-Type:' \
+              --data-binary "{\"Status\":\"$status\",\"Reason\":\"$reason\",\"UniqueId\":\"qfieldcloud-bootstrap\",\"Data\":\"$data\"}" \
+              "$wait_handle" >/dev/null 2>/dev/null; then
+              rm -f -- "$state_dir/SIGNAL_FAILED"
+              return 0
+            fi
+            if [ -d "$state_dir" ]; then
+              printf '%s\n' "$status" >"$state_dir/SIGNAL_FAILED"
+              chmod 0600 "$state_dir/SIGNAL_FAILED"
+            fi
+            return 1
+          fi
+          return 1
+        }
+
+        on_exit() {
+          rc=$?
+          if [ -n "$download_path" ]; then
+            rm -f -- "$download_path"
+          fi
+          if [ "$rc" -ne 0 ]; then
+            rm -f -- "$state_dir/SUCCESS"
+            touch "$state_dir/FAILED"
+            chmod 0600 "$state_dir/FAILED"
+            printf '%s\n' 'QFieldCloud bootstrap failed; inspect the root-only local log.' >&2
+            signal_bootstrap 'FAILURE' 'Verified bootstrap or validation failed.' 'failed' || true
+          fi
+          exit "$rc"
+        }
+        trap on_exit EXIT
+
+        if [ "$(id -u)" -ne 0 ]; then
+          printf '%s\n' 'QFieldCloud bootstrap must run as root.' >&2
+          exit 1
+        fi
+        if ! command -v timeout >/dev/null 2>&1; then
+          printf '%s\n' 'The required coreutils timeout command is unavailable.' >&2
+          exit 1
+        fi
+
+        install -d -m 0700 "$state_dir" "$install_root"
+
+        if [ -f "$state_dir/SUCCESS" ] &&
+           grep -Fqx "revision=$revision" "$state_dir/SUCCESS" &&
+           grep -Fqx "bootstrap_sha256=$expected_sha256" "$state_dir/SUCCESS" &&
+           [ -f "$certificate_fingerprint_file" ]; then
+          certificate_sha256="$(cat "$certificate_fingerprint_file")"
+          if ! [[ "$certificate_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            printf '%s\n' 'The stored certificate fingerprint is invalid.' >&2
+            exit 1
+          fi
+          printf '%s\n' 'The verified QFieldCloud bootstrap revision is already installed.'
+          signal_bootstrap 'SUCCESS' 'The requested verified bootstrap was already installed.' "$certificate_sha256"
+          trap - EXIT
+          exit 0
+        fi
+
+        export DEBIAN_FRONTEND=noninteractive
+        timeout --signal=TERM --kill-after=30s 420s \
+          apt-get update -qq
+        timeout --signal=TERM --kill-after=30s 420s \
+          apt-get install -y -qq --no-install-recommends ca-certificates curl
+
+        download_path="$(mktemp "$state_dir/bootstrap.download.XXXXXX")"
+        timeout --signal=TERM --kill-after=15s 180s curl \
+          --proto '=https' \
+          --tlsv1.2 \
+          --fail \
+          --silent \
+          --show-error \
+          --location \
+          --retry 5 \
+          --retry-all-errors \
+          --retry-max-time 120 \
+          --connect-timeout 15 \
+          --max-time 60 \
+          --output "$download_path" \
+          "$raw_url"
+
+        actual_sha256="$(sha256sum "$download_path" | awk '{print $1}')"
+        if [ "$actual_sha256" != "$expected_sha256" ]; then
+          printf '%s\n' 'Bootstrap SHA-256 verification failed; the file was not executed.' >&2
+          exit 1
+        fi
+
+        install -m 0700 "$download_path" "$bootstrap_file"
+        rm -f -- "$download_path"
+        download_path=''
+
+        if ! timeout --signal=TERM --kill-after=600s "$bootstrap_timeout_seconds" \
+          "$bootstrap_file" \
+          --repository-url "$repository_url" \
+          --revision "$revision" \
+          --install-root "$install_root" \
+          >"$bootstrap_log" 2>&1; then
+          printf '%s\n' 'Bootstrap execution failed, exceeded its 80-minute work limit, or could not finish shutdown within 10 minutes; inspect /var/lib/qfieldcloud-bootstrap/bootstrap.log as root.' >&2
+          exit 1
+        fi
+        chmod 0600 "$bootstrap_log"
+
+        certificate_sha256="$(cat "$certificate_fingerprint_file")"
+        if ! [[ "$certificate_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+          printf '%s\n' 'The bootstrap did not produce a valid certificate fingerprint.' >&2
+          exit 1
+        fi
+
+        {
+          printf 'revision=%s\n' "$revision"
+          printf 'bootstrap_sha256=%s\n' "$expected_sha256"
+        } >"$state_dir/SUCCESS"
+        chmod 0600 "$state_dir/SUCCESS"
+        rm -f -- "$state_dir/FAILED"
+        signal_bootstrap 'SUCCESS' 'Verified bootstrap and validation passed.' "$certificate_sha256"
+        trap - EXIT
+        printf '%s\n' 'Verified QFieldCloud bootstrap completed.'
+
+  StaticIp:
+    Type: AWS::Lightsail::StaticIp
+    DependsOn:
+      - LightsailInstance
+    Properties:
+      StaticIpName: !Sub '${InstanceName}-ip'
+      AttachedTo: !Ref InstanceName
+
+  BootstrapWaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn:
+      - StaticIp
+    Properties:
+      Count: 1
+      Handle: !Ref BootstrapWaitHandle
+      Timeout: '7200'
+
+  StatusCheckFailedAlarm:
+    Type: AWS::Lightsail::Alarm
+    Condition: AlarmsEnabled
+    DependsOn:
+      - LightsailInstance
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-status-check-failed'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 2
+      EvaluationPeriods: 2
+      MetricName: StatusCheckFailed
+      MonitoredResourceName: !Ref InstanceName
+      NotificationEnabled: false
+      NotificationTriggers:
+        - ALARM
+      Threshold: 1
+      TreatMissingData: missing
+
+  HighCpuAlarm:
+    Type: AWS::Lightsail::Alarm
+    Condition: AlarmsEnabled
+    DependsOn:
+      - LightsailInstance
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-high-cpu'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 3
+      EvaluationPeriods: 3
+      MetricName: CPUUtilization
+      MonitoredResourceName: !Ref InstanceName
+      NotificationEnabled: false
+      NotificationTriggers:
+        - ALARM
+      Threshold: !Ref CpuAlarmThresholdPercent
+      TreatMissingData: missing
+
+Outputs:
+  DeploymentProfile:
+    Description: Deployment profile created by this stack.
+    Value: lab-lightsail
+
+  DeployedRegion:
+    Description: AWS Region in which CloudFormation created the stack.
+    Value: !Ref 'AWS::Region'
+
+  InstanceName:
+    Description: Lightsail instance name.
+    Value: !Ref InstanceName
+
+  StaticIpv4Address:
+    Description: Public static IPv4 address attached to the instance.
+    Value: !GetAtt StaticIp.IpAddress
+
+  HttpUrl:
+    Description: >-
+      Lab hostname derived from the static IPv4 address. HTTP redirects to HTTPS.
+      sslip.io is a third-party wildcard DNS service used only by this lab profile.
+    Value: !Sub
+      - 'http://${IpAddress}.sslip.io/'
+      - IpAddress: !GetAtt StaticIp.IpAddress
+
+  HttpsUrl:
+    Description: >-
+      Lab HTTPS URL. The bootstrap initially creates a self-signed certificate,
+      so clients must verify it out of band before accepting it.
+    Value: !Sub
+      - 'https://${IpAddress}.sslip.io/'
+      - IpAddress: !GetAtt StaticIp.IpAddress
+
+  PilotHostName:
+    Description: Public lab hostname; no credential is included.
+    Value: !Sub
+      - '${IpAddress}.sslip.io'
+      - IpAddress: !GetAtt StaticIp.IpAddress
+
+  BootstrapRevision:
+    Description: Public Git commit used to retrieve the verified bootstrap file.
+    Value: !Ref BootstrapRevision
+
+  BootstrapSha256:
+    Description: SHA-256 of the bootstrap file verified before execution.
+    Value: !Ref BootstrapSha256
+
+  BootstrapValidationData:
+    Description: >-
+      Authenticated CloudFormation wait-condition data. It maps the fixed
+      qfieldcloud-bootstrap signal ID to the public TLS certificate SHA-256.
+    Value: !GetAtt BootstrapWaitCondition.Data
+
+  BootstrapStatusFile:
+    Description: Root-only local marker to inspect after connecting to the instance.
+    Value: /var/lib/qfieldcloud-bootstrap/SUCCESS
+
+  SshAccessMode:
+    Description: Port 22 is restricted to the Lightsail browser SSH alias.
+    Value: !Ref SshAccessMode
+
+  AutomaticSnapshots:
+    Description: Whether Lightsail automatic snapshots are enabled.
+    Value: !Ref EnableAutomaticSnapshots
+
+  StatusCheckAlarmArn:
+    Condition: AlarmsEnabled
+    Description: Lightsail StatusCheckFailed alarm ARN; notifications are disabled.
+    Value: !GetAtt StatusCheckFailedAlarm.AlarmArn
+
+  HighCpuAlarmArn:
+    Condition: AlarmsEnabled
+    Description: Lightsail CPUUtilization alarm ARN; notifications are disabled.
+    Value: !GetAtt HighCpuAlarm.AlarmArn

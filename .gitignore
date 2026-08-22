@@ -1,0 +1,11 @@
+# Local deployment inputs and generated artifacts. Never commit credentials,
+# private keys, runtime state, or backup data.
+/.local/
+/artifacts/
+/infra/lab-lightsail/parameters.local.json
+**/secrets.env
+**/runtime.env
+**/state/
+**/backups/
+*.key
+*.pem
