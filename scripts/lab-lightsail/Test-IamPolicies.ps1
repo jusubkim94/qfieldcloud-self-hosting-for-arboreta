@@ -114,10 +114,15 @@ $expectedLightsailAllowActions = @(
     'lightsail:GetAlarms'
     'lightsail:GetBlueprints'
     'lightsail:GetBundles'
+    'lightsail:GetDisks'
+    'lightsail:GetDistributions'
     'lightsail:GetInstance'
     'lightsail:GetInstanceAccessDetails'
     'lightsail:GetInstances'
+    'lightsail:GetInstanceSnapshots'
     'lightsail:GetInstanceState'
+    'lightsail:GetKeyPairs'
+    'lightsail:GetLoadBalancers'
     'lightsail:GetRegions'
     'lightsail:GetStaticIp'
     'lightsail:GetStaticIps'
@@ -135,6 +140,45 @@ $cloudFormationAllowActions = @($allAllowActions | Where-Object { $_ -like 'clou
 $lightsailAllowActions = @($allAllowActions | Where-Object { $_ -like 'lightsail:*' })
 Assert-Contract (Test-ExactSet -Actual $cloudFormationAllowActions -Expected $expectedCloudFormationAllowActions) '배포 정책에 예상 밖 CloudFormation Allow가 있거나 필수 Allow가 없습니다.'
 Assert-Contract (Test-ExactSet -Actual $lightsailAllowActions -Expected $expectedLightsailAllowActions) '배포 정책에 예상 밖 Lightsail Allow가 있거나 필수 Allow가 없습니다.'
+
+$cloudFormationRegionDeny = @($deployer.Statement | Where-Object { $_.Sid -eq 'DenyCloudFormationOutsideSeoul' })
+Assert-Contract ($cloudFormationRegionDeny.Count -eq 1) '서울 밖 CloudFormation Deny가 정확히 하나여야 합니다.'
+Assert-Contract ($cloudFormationRegionDeny[0].Action -eq 'cloudformation:*') '서울 밖 CloudFormation Deny 작업이 다릅니다.'
+Assert-Contract ($cloudFormationRegionDeny[0].Resource -eq '*') '서울 밖 CloudFormation Deny 범위가 다릅니다.'
+Assert-Contract ($cloudFormationRegionDeny[0].Condition.StringNotEquals.'aws:RequestedRegion' -eq 'ap-northeast-2') 'CloudFormation 허용 리전은 서울뿐이어야 합니다.'
+
+$lightsailRegionDeny = @($deployer.Statement | Where-Object { $_.Sid -eq 'DenyLightsailOutsideApprovedConsoleRegions' })
+Assert-Contract ($lightsailRegionDeny.Count -eq 1) '승인 리전 밖 Lightsail Deny가 정확히 하나여야 합니다.'
+Assert-Contract ($lightsailRegionDeny[0].Action -eq 'lightsail:*') '승인 리전 밖 Lightsail Deny 작업이 다릅니다.'
+Assert-Contract ($lightsailRegionDeny[0].Resource -eq '*') '승인 리전 밖 Lightsail Deny 범위가 다릅니다.'
+Assert-Contract (Test-ExactSet -Actual @($lightsailRegionDeny[0].Condition.StringNotEquals.'aws:RequestedRegion') -Expected @('ap-northeast-2', 'us-east-1')) 'Lightsail 허용 리전 목록이 다릅니다.'
+
+$seoulReadActions = @(
+    'lightsail:GetAlarms'
+    'lightsail:GetBlueprints'
+    'lightsail:GetBundles'
+    'lightsail:GetDisks'
+    'lightsail:GetInstance'
+    'lightsail:GetInstances'
+    'lightsail:GetInstanceSnapshots'
+    'lightsail:GetInstanceState'
+    'lightsail:GetKeyPairs'
+    'lightsail:GetLoadBalancers'
+    'lightsail:GetRegions'
+    'lightsail:GetStaticIp'
+    'lightsail:GetStaticIps'
+)
+$seoulReadStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'ReadLightsailDeploymentStateInSeoul' })
+Assert-Contract ($seoulReadStatement.Count -eq 1) '서울 Lightsail 조회 statement가 정확히 하나여야 합니다.'
+Assert-Contract (Test-ExactSet -Actual @($seoulReadStatement[0].Action) -Expected $seoulReadActions) '서울 Lightsail 조회 작업 목록이 다릅니다.'
+Assert-Contract ($seoulReadStatement[0].Resource -eq '*') '서울 Lightsail 목록 조회는 AWS가 요구하는 별표 범위여야 합니다.'
+Assert-Contract ($seoulReadStatement[0].Condition.StringEquals.'aws:RequestedRegion' -eq 'ap-northeast-2') '서울 Lightsail 조회 리전이 다릅니다.'
+
+$distributionReadStatement = @($deployer.Statement | Where-Object { $_.Sid -eq 'ReadLightsailDistributionMetadataForConsoleInVirginia' })
+Assert-Contract ($distributionReadStatement.Count -eq 1) '버지니아 CDN 조회 statement가 정확히 하나여야 합니다.'
+Assert-Contract ($distributionReadStatement[0].Action -eq 'lightsail:GetDistributions') '버지니아에서는 CDN 목록 조회만 허용해야 합니다.'
+Assert-Contract ($distributionReadStatement[0].Resource -eq '*') 'CDN 목록 조회는 AWS가 요구하는 별표 범위여야 합니다.'
+Assert-Contract ($distributionReadStatement[0].Condition.StringEquals.'aws:RequestedRegion' -eq 'us-east-1') 'CDN 목록 조회 리전은 버지니아 북부여야 합니다.'
 
 foreach ($action in $cloudFormationOnlyLightsailActions) {
     $statements = @(Get-AllowStatementsForAction -Policy $deployer -Action $action)

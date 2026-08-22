@@ -2,16 +2,27 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DenyCloudFormationAndLightsailOutsideSeoul",
+      "Sid": "DenyCloudFormationOutsideSeoul",
       "Effect": "Deny",
-      "Action": [
-        "cloudformation:*",
-        "lightsail:*"
-      ],
+      "Action": "cloudformation:*",
       "Resource": "*",
       "Condition": {
         "StringNotEquals": {
           "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    },
+    {
+      "Sid": "DenyLightsailOutsideApprovedConsoleRegions",
+      "Effect": "Deny",
+      "Action": "lightsail:*",
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": [
+            "ap-northeast-2",
+            "us-east-1"
+          ]
         }
       }
     },
@@ -95,9 +106,13 @@
         "lightsail:GetAlarms",
         "lightsail:GetBlueprints",
         "lightsail:GetBundles",
+        "lightsail:GetDisks",
         "lightsail:GetInstance",
         "lightsail:GetInstances",
+        "lightsail:GetInstanceSnapshots",
         "lightsail:GetInstanceState",
+        "lightsail:GetKeyPairs",
+        "lightsail:GetLoadBalancers",
         "lightsail:GetRegions",
         "lightsail:GetStaticIp",
         "lightsail:GetStaticIps"
@@ -106,6 +121,17 @@
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadLightsailDistributionMetadataForConsoleInVirginia",
+      "Effect": "Allow",
+      "Action": "lightsail:GetDistributions",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
         }
       }
     },
