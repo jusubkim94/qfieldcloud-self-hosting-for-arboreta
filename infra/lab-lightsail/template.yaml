@@ -319,6 +319,7 @@ Resources:
         readonly bootstrap_log="$state_dir/bootstrap.log"
         readonly bootstrap_timeout_seconds='4800'
         readonly certificate_fingerprint_file="$install_root/state/certificate-sha256"
+        readonly health_check_file="$install_root/bin/health-check.sh"
         IFS= read -r wait_handle <<'QFC_WAIT_HANDLE_V1'
         ${BootstrapWaitHandle}
         QFC_WAIT_HANDLE_V1
@@ -389,10 +390,12 @@ Resources:
           printf '%s\n' 'QFieldCloud bootstrap must run as root.' >&2
           exit 1
         fi
-        if ! command -v timeout >/dev/null 2>&1; then
-          printf '%s\n' 'The required coreutils timeout command is unavailable.' >&2
-          exit 1
-        fi
+        for required_command in sleep stat timeout; do
+          if ! command -v "$required_command" >/dev/null 2>&1; then
+            printf 'Required bootstrap command is unavailable: %s\n' "$required_command" >&2
+            exit 1
+          fi
+        done
 
         install -d -m 0700 "$state_dir" "$install_root"
 
@@ -403,6 +406,41 @@ Resources:
           certificate_sha256="$(cat "$certificate_fingerprint_file")"
           if ! [[ "$certificate_sha256" =~ ^[0-9a-f]{64}$ ]]; then
             printf '%s\n' 'The stored certificate fingerprint is invalid.' >&2
+            exit 1
+          fi
+          health_check_metadata="$(stat -c '%u:%g:%a' "$health_check_file" 2>/dev/null || true)"
+          if [ ! -f "$health_check_file" ] || [ -L "$health_check_file" ] ||
+             [ ! -x "$health_check_file" ] || [ "$health_check_metadata" != '0:0:700' ]; then
+            printf '%s\n' 'The installed health-check helper is missing or unsafe.' >&2
+            exit 1
+          fi
+          fast_path_health_ok='false'
+          fast_path_health_deadline=$((SECONDS + 600))
+          while ((SECONDS < fast_path_health_deadline)); do
+            fast_path_health_remaining=$((fast_path_health_deadline - SECONDS))
+            # Reserve the five-second forced-stop allowance inside the overall
+            # ten-minute retry deadline.
+            ((fast_path_health_remaining > 5)) || break
+            fast_path_health_timeout_seconds=30
+            if ((fast_path_health_remaining - 5 < fast_path_health_timeout_seconds)); then
+              fast_path_health_timeout_seconds=$((fast_path_health_remaining - 5))
+            fi
+            if QFC_INSTALL_ROOT="$install_root" \
+               timeout --signal=TERM --kill-after=5s "$fast_path_health_timeout_seconds"s \
+               "$health_check_file" >/dev/null 2>&1; then
+              fast_path_health_ok='true'
+              break
+            fi
+            fast_path_health_remaining=$((fast_path_health_deadline - SECONDS))
+            ((fast_path_health_remaining > 0)) || break
+            if ((fast_path_health_remaining < 10)); then
+              sleep "$fast_path_health_remaining"
+            else
+              sleep 10
+            fi
+          done
+          if [ "$fast_path_health_ok" != 'true' ]; then
+            printf '%s\n' 'The existing installation did not become healthy within 10 minutes; no success signal was sent.' >&2
             exit 1
           fi
           printf '%s\n' 'The verified QFieldCloud bootstrap revision is already installed.'
@@ -487,7 +525,9 @@ Resources:
     Properties:
       Count: 1
       Handle: !Ref BootstrapWaitHandle
-      Timeout: '7200'
+      # Known launcher bounds total 6,705 seconds; 7,800 leaves more than
+      # 15 minutes for instance boot, local work, and the final signal.
+      Timeout: '7800'
 
   StatusCheckFailedAlarm:
     Type: AWS::Lightsail::Alarm

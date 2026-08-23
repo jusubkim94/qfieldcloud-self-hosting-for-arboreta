@@ -346,6 +346,100 @@ Assert-Contract ($onExitLines[2] -ceq '  trap - EXIT') 'Lightsail 실패 trap의
 Assert-Contract ($onExitLines[3] -ceq '  set +e') 'Lightsail 실패 정리 작업이 원래 종료코드를 가릴 수 있습니다.'
 Assert-Contract ($onExitLines -contains '       [ ! -L "$state_dir" ] &&') 'Lightsail 실패 상태 디렉터리의 symlink 쓰기를 거부하지 않습니다.'
 Assert-Contract ($onExitLines[-2] -ceq '  exit "$rc"') 'Lightsail 실패 trap이 원래 종료코드로 끝나지 않습니다.'
+$successFastPathStart = [array]::IndexOf($userDataLines, 'if [ -f "$state_dir/SUCCESS" ] &&')
+$normalBootstrapStart = [array]::IndexOf($userDataLines, 'export DEBIAN_FRONTEND=noninteractive')
+Assert-Contract (
+    $successFastPathStart -gt $onExitEnd -and
+    $normalBootstrapStart -gt $successFastPathStart
+) '기존 SUCCESS 재사용 검증 블록의 경계를 찾지 못했습니다.'
+$successFastPathText = $userDataLines[$successFastPathStart..($normalBootstrapStart - 1)] -join "`n"
+$fastPathHealthIndex = $successFastPathText.IndexOf(
+    '"$health_check_file" >/dev/null 2>&1; then',
+    [StringComparison]::Ordinal
+)
+$fastPathSignalIndex = $successFastPathText.IndexOf(
+    "signal_bootstrap 'SUCCESS'",
+    [StringComparison]::Ordinal
+)
+$fastPathFailureIndex = $successFastPathText.IndexOf(
+    'The existing installation did not become healthy within 10 minutes',
+    [StringComparison]::Ordinal
+)
+$userDataText = $userDataLines -join "`n"
+Assert-Contract (
+    $userDataText.Contains('readonly health_check_file="$install_root/bin/health-check.sh"') -and
+    $successFastPathText.Contains('[ ! -f "$health_check_file" ]') -and
+    $successFastPathText.Contains('[ -L "$health_check_file" ]') -and
+    $successFastPathText.Contains('[ ! -x "$health_check_file" ]') -and
+    $successFastPathText.Contains('stat -c ''%u:%g:%a'' "$health_check_file"') -and
+    $successFastPathText.Contains('[ "$health_check_metadata" != ''0:0:700'' ]') -and
+    $successFastPathText.Contains('fast_path_health_deadline=$((SECONDS + 600))') -and
+    $successFastPathText.Contains('fast_path_health_timeout_seconds=$((fast_path_health_remaining - 5))') -and
+    $successFastPathText.Contains('timeout --signal=TERM --kill-after=5s "$fast_path_health_timeout_seconds"s') -and
+    $successFastPathText.Contains('QFC_INSTALL_ROOT="$install_root"') -and
+    $successFastPathText.Contains('The existing installation did not become healthy within 10 minutes') -and
+    $fastPathFailureIndex -ge 0 -and
+    $successFastPathText.IndexOf('exit 1', $fastPathFailureIndex, [StringComparison]::Ordinal) -gt $fastPathFailureIndex -and
+    $fastPathHealthIndex -ge 0 -and
+    $fastPathSignalIndex -gt $fastPathHealthIndex
+) '기존 SUCCESS가 bounded 전체 health gate 없이 다시 신호될 수 있습니다.'
+Assert-Contract (
+    $successFastPathText -notmatch '(?m)^\s*(?:compose|systemctl)\s+(?:up|start|restart|stop)\b'
+) 'SUCCESS fast path가 상태 확인 외의 서비스 변경을 수행합니다.'
+
+$bootstrapWorkMatch = [regex]::Match(
+    $userDataText,
+    "readonly bootstrap_timeout_seconds='(?<Value>[0-9]+)'"
+)
+$bootstrapKillMatch = [regex]::Match(
+    $userDataText,
+    'timeout --signal=TERM --kill-after=(?<Kill>[0-9]+)s "\$bootstrap_timeout_seconds"'
+)
+$aptTimeoutMatches = [regex]::Matches(
+    $userDataText,
+    'timeout --signal=TERM --kill-after=(?<Kill>[0-9]+)s (?<Work>[0-9]+)s\s*\\?\s*apt-get'
+)
+$downloadTimeoutMatch = [regex]::Match(
+    $userDataText,
+    'timeout --signal=TERM --kill-after=(?<Kill>[0-9]+)s (?<Work>[0-9]+)s curl'
+)
+$signalFunctionMatch = [regex]::Match(
+    $userDataText,
+    '(?ms)signal_bootstrap\(\).*?--max-time (?<Max>[0-9]+).*?--retry-max-time (?<Retry>[0-9]+).*?^}'
+)
+$waitConditionMatch = [regex]::Match(
+    $templateText,
+    "(?ms)^  BootstrapWaitCondition:.*?^      Timeout: '(?<Value>[0-9]+)'\s*$"
+)
+Assert-Contract (
+    $bootstrapWorkMatch.Success -and
+    $bootstrapKillMatch.Success -and
+    $aptTimeoutMatches.Count -eq 2 -and
+    $downloadTimeoutMatch.Success -and
+    $signalFunctionMatch.Success -and
+    $waitConditionMatch.Success
+) 'Bootstrap 또는 WaitCondition 시간 예산을 계산할 수 없습니다.'
+$knownLauncherBoundSeconds =
+    [int]$bootstrapWorkMatch.Groups['Value'].Value +
+    [int]$bootstrapKillMatch.Groups['Kill'].Value +
+    (@($aptTimeoutMatches) | ForEach-Object {
+        [int]$_.Groups['Work'].Value + [int]$_.Groups['Kill'].Value
+    } | Measure-Object -Sum).Sum +
+    [int]$downloadTimeoutMatch.Groups['Work'].Value +
+    [int]$downloadTimeoutMatch.Groups['Kill'].Value +
+    [int]$signalFunctionMatch.Groups['Max'].Value +
+    [int]$signalFunctionMatch.Groups['Retry'].Value
+$waitConditionSeconds = [int]$waitConditionMatch.Groups['Value'].Value
+Assert-Contract (
+    ($waitConditionSeconds - $knownLauncherBoundSeconds) -ge 900
+) 'WaitCondition에는 알려진 launcher 상한 뒤 최소 15분의 부팅·신호 여유가 필요합니다.'
+Assert-Contract (
+    $userDataText.IndexOf('umask 077', [StringComparison]::Ordinal) -ge 0 -and
+    $userDataText.IndexOf('readonly bootstrap_log=', [StringComparison]::Ordinal) -gt
+        $userDataText.IndexOf('umask 077', [StringComparison]::Ordinal) -and
+    $userDataText.Contains('>"$bootstrap_log" 2>&1') -and
+    $userDataText.Contains('chmod 0600 "$bootstrap_log"')
+) '바깥 bootstrap 로그의 root 전용 0600 권한 계약이 사라졌습니다.'
 $expectedUserDataSubstitutions = @(
     'BootstrapPath'
     'BootstrapRevision'

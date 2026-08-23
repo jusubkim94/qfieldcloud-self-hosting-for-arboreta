@@ -45,6 +45,11 @@ Assert-Contract (
     Test-Path -LiteralPath $bootstrapPath -PathType Leaf
 ) "Missing script: $bootstrapPath"
 $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapPath
+$workerSmokeText = Get-Content -Raw -LiteralPath (
+    Join-Path $PSScriptRoot 'worker-smoke-test.sh'
+)
+$backupText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'backup.sh')
+$restoreTestText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'restore-test.sh')
 $scriptPaths = [ordered]@{
     Deploy  = Join-Path $PSScriptRoot 'Deploy-QFieldCloudPilot.ps1'
     Verify  = Join-Path $PSScriptRoot 'Test-QFieldCloudPilot.ps1'
@@ -161,6 +166,63 @@ Assert-Contract (
 Assert-Contract (
     $bootstrapText.Contains('curl --fail --silent --show-error --connect-timeout 5 --max-time 20')
 ) 'The initial HTTPS health gate must bound both connection and total request time.'
+Assert-Contract (
+    $bootstrapText.Contains('echo "Installation-gate health-check JSON:"') -and
+    $bootstrapText.Contains('if ! "$install_root/bin/health-check.sh" --installation-gate; then') -and
+    $bootstrapText.Contains('echo "Final health-check JSON:"') -and
+    $bootstrapText.Contains('if ! "$install_root/bin/health-check.sh"; then') -and
+    -not $bootstrapText.Contains('--installation-gate >/dev/null')
+) 'Bootstrap health failures do not retain their non-secret JSON diagnosis in the root-only log.'
+Assert-Contract (
+    $bootstrapText.IndexOf('umask 077', [StringComparison]::Ordinal) -ge 0 -and
+    $bootstrapText.IndexOf('readonly log_file="/var/log/qfieldcloud/bootstrap.log"', [StringComparison]::Ordinal) -gt
+        $bootstrapText.IndexOf('umask 077', [StringComparison]::Ordinal) -and
+    $bootstrapText.Contains('touch "$log_file"') -and
+    $bootstrapText.Contains('chmod 0600 "$log_file"') -and
+    $bootstrapText.Contains('exec > >(tee -a "$log_file") 2>&1')
+) 'The inner bootstrap diagnosis log is not pinned to its root-only 0600 contract.'
+Assert-Contract (
+    $workerSmokeText.Contains('readonly job_wait_timeout_seconds=1200') -and
+    $workerSmokeText.Contains('readonly job_poll_request_cap_seconds=20') -and
+    $workerSmokeText.Contains('--connect-timeout 5') -and
+    $workerSmokeText.Contains('IFS='' '' read -r uptime_seconds _ </proc/uptime') -and
+    $workerSmokeText.Contains('deadline=$((now + job_wait_timeout_seconds))') -and
+    $workerSmokeText.Contains('request_timeout=$remaining') -and
+    $workerSmokeText.Contains('api_get_fresh "$base_url/jobs/$job_id/" "$request_timeout"') -and
+    $workerSmokeText.Contains('sleep_seconds=$remaining') -and
+    $workerSmokeText.Contains('local timeout_seconds="$1"') -and
+    $workerSmokeText.Contains('curl "${curl_common[@]}" --max-time "$timeout_seconds"') -and
+    -not $workerSmokeText.Contains('seq 1 120')
+) 'The worker wait is not bounded by a real 20-minute monotonic deadline.'
+Assert-Contract (
+    $workerSmokeText.Contains('docker container ls --all --no-trunc --quiet --filter "id=$container_id"') -and
+    $workerSmokeText.Contains('Docker could not verify temporary QGIS worker container cleanup.') -and
+    -not $workerSmokeText.Contains('if docker inspect "$container_id"')
+) 'Docker errors can be mistaken for successful temporary worker-container removal.'
+Assert-Contract (
+    $workerSmokeText.Contains('((.the_qgis_file_name | type) == "string")') -and
+    $workerSmokeText.Contains('((.the_qgis_file_name | length) > 0)') -and
+    $workerSmokeText.Contains('((.files | type) == "array")') -and
+    $workerSmokeText.Contains('((.files | length) > 0)')
+) 'The worker smoke test can accept an empty QGIS filename or package.'
+Assert-Contract (
+    $backupText.Contains('install -o root -g root -m 0700 -d "$backup_root"') -and
+    $backupText.Contains('stat -c ''%u:%g:%a'' "$backup_root"') -and
+    $backupText.Contains('has_root_controlled_ancestors "$install_root"') -and
+    $backupText.Contains('has_root_controlled_ancestors "$backup_root"') -and
+    $backupText.Contains('^0:0:[1357][0145][0145]$') -and
+    $backupText.Contains('stat -c ''%u:%g:%a'' "$trusted_directory"') -and
+    $backupText.Contains('stat -c ''%u:%g:%a'' "$required_file"') -and
+    $backupText.Contains('stat -c ''%u:%g:%a'' "$health_check_file"') -and
+    $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$runtime_temp_root"') -and
+    $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$backup_file"') -and
+    $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$checksums_file"') -and
+    $restoreTestText.Contains('has_root_controlled_ancestors "$install_root"') -and
+    $restoreTestText.Contains('has_root_controlled_ancestors "$backup_root"') -and
+    $restoreTestText.Contains('^0:0:[1357][0145][0145]$') -and
+    $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$operational_file"') -and
+    $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$operational_health_check_file"')
+) 'Backup or isolated-restore paths can bypass their root ownership and mode contract.'
 
 $deployTokens = $null
 $deployErrors = $null

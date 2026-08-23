@@ -21,6 +21,10 @@ smoke_status_file="$install_root/state/worker-smoke-status.json"
 smoke_owner_file="$install_root/state/worker-smoke-owned-project.json"
 smoke_project_name="installer-worker-smoke"
 smoke_description_prefix="qfc-installer-worker-smoke"
+readonly default_api_timeout_seconds=60
+readonly job_poll_request_cap_seconds=20
+readonly job_poll_seconds=10
+readonly job_wait_timeout_seconds=1200
 
 for required_file in "$versions_file" "$runtime_env" "$compose_file" "$secrets_file" \
   "$public_host_file" "$certificate_file" "$installer_revision_file"; do
@@ -150,17 +154,25 @@ curl_common=(
   --show-error
   --fail
   --cacert "$certificate_file"
-  --max-time 60
+  --connect-timeout 5
   --resolve "$public_host:443:127.0.0.1"
 )
 
 api_auth() {
-  curl "${curl_common[@]}" --config "$auth_config" "$@"
+  local timeout_seconds="$1"
+  shift
+
+  if [[ ! $timeout_seconds =~ ^[1-9][0-9]*$ ]]; then
+    echo "The worker-smoke API timeout is invalid." >&2
+    return 2
+  fi
+  curl "${curl_common[@]}" --max-time "$timeout_seconds" --config "$auth_config" "$@"
 }
 
 api_nonce_counter=0
 api_get_fresh() {
   local request_url="$1"
+  local timeout_seconds="${2:-$default_api_timeout_seconds}"
   local separator="?"
   local request_nonce=""
 
@@ -169,10 +181,22 @@ api_get_fresh() {
     separator="&"
   fi
   request_nonce="${attempt_nonce}-${api_nonce_counter}-$(date +%s%N)"
-  api_auth \
+  api_auth "$timeout_seconds" \
     --header 'Cache-Control: no-cache' \
     --header 'Pragma: no-cache' \
     "${request_url}${separator}qfc_smoke_nonce=${request_nonce}"
+}
+
+monotonic_seconds() {
+  local uptime_seconds=""
+
+  if [[ ! -r /proc/uptime ]]; then
+    return 1
+  fi
+  IFS=' ' read -r uptime_seconds _ </proc/uptime || return 1
+  uptime_seconds="${uptime_seconds%%.*}"
+  [[ $uptime_seconds =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$uptime_seconds"
 }
 
 is_uuid() {
@@ -636,7 +660,7 @@ if [[ $project_count == "0" ]]; then
         extent: "126.90,37.40,127.10,37.60"
       }
     }' >"$project_request"
-  project_json="$(api_auth \
+  project_json="$(api_auth "$default_api_timeout_seconds" \
     --request POST \
     --header 'Content-Type: application/json' \
     --data-binary "@$project_request" \
@@ -695,11 +719,31 @@ fi
 wait_for_job() {
   local job_id="$1"
   local job_label="$2"
+  local deadline=0
   local job_json=""
   local job_status=""
+  local now=0
+  local remaining=0
+  local request_timeout=0
+  local sleep_seconds=0
 
-  for _ in $(seq 1 120); do
-    job_json="$(api_get_fresh "$base_url/jobs/$job_id/")"
+  if ! now="$(monotonic_seconds)"; then
+    echo "A monotonic clock is unavailable for the $job_label worker deadline." >&2
+    return 1
+  fi
+  deadline=$((now + job_wait_timeout_seconds))
+  while :; do
+    if ! now="$(monotonic_seconds)"; then
+      echo "The monotonic clock failed during the $job_label worker wait." >&2
+      return 1
+    fi
+    remaining=$((deadline - now))
+    ((remaining > 0)) || break
+    request_timeout=$job_poll_request_cap_seconds
+    if ((remaining < request_timeout)); then
+      request_timeout=$remaining
+    fi
+    job_json="$(api_get_fresh "$base_url/jobs/$job_id/" "$request_timeout")"
     job_status="$(jq -er '.status | select(type == "string")' <<<"$job_json")"
     case "$job_status" in
       finished)
@@ -710,7 +754,17 @@ wait_for_job() {
         return 1
         ;;
       pending | queued | started)
-        sleep 10
+        if ! now="$(monotonic_seconds)"; then
+          echo "The monotonic clock failed during the $job_label worker wait." >&2
+          return 1
+        fi
+        remaining=$((deadline - now))
+        ((remaining > 0)) || break
+        sleep_seconds=$job_poll_seconds
+        if ((remaining < sleep_seconds)); then
+          sleep_seconds=$remaining
+        fi
+        sleep "$sleep_seconds"
         ;;
       *)
         echo "$job_label worker job returned an unexpected status." >&2
@@ -727,6 +781,7 @@ verify_removed_worker_container() {
   local metadata_output=""
   local metadata_json=""
   local container_id=""
+  local matching_ids=""
   local qgis_version=""
 
   metadata_output="$(compose exec -T \
@@ -759,8 +814,14 @@ print("QFC_SMOKE_METADATA=" + json.dumps({
     echo "The worker job did not report the pinned QGIS 3 version." >&2
     return 1
   fi
-  if docker inspect "$container_id" >/dev/null 2>&1; then
-    echo "The temporary QGIS worker container still exists after the finished job." >&2
+  if ! matching_ids="$(
+    docker container ls --all --no-trunc --quiet --filter "id=$container_id"
+  )"; then
+    echo "Docker could not verify temporary QGIS worker container cleanup." >&2
+    return 1
+  fi
+  if [[ -n $matching_ids ]]; then
+    echo "The temporary QGIS worker container still exists or Docker returned unexpected metadata." >&2
     return 1
   fi
   verified_qgis_version="$qgis_version"
@@ -772,7 +833,12 @@ if [[ -n $create_job_id ]]; then
 fi
 
 project_json="$(api_get_fresh "$base_url/projects/$project_id/")"
-if ! jq -e '.status == "ok" and .the_qgis_file_name != null' >/dev/null <<<"$project_json"; then
+if ! jq -e '
+  type == "object" and
+  .status == "ok" and
+  ((.the_qgis_file_name | type) == "string") and
+  ((.the_qgis_file_name | length) > 0)
+' >/dev/null <<<"$project_json"; then
   echo "The worker smoke project is not ready for packaging." >&2
   exit 1
 fi
@@ -780,7 +846,7 @@ fi
 package_request="$test_root/package.json"
 jq -n --arg project_id "$project_id" \
   '{project_id: $project_id, type: "package"}' >"$package_request"
-package_job_json="$(api_auth \
+package_job_json="$(api_auth "$default_api_timeout_seconds" \
   --request POST \
   --header 'Content-Type: application/json' \
   --data-binary "@$package_request" \
@@ -795,7 +861,12 @@ wait_for_job "$package_job_id" "package"
 verify_removed_worker_container "$package_job_id"
 
 latest_package="$(api_get_fresh "$base_url/packages/$project_id/latest/")"
-if ! jq -e '.status == "finished" and (.files | type == "array")' >/dev/null <<<"$latest_package"; then
+if ! jq -e '
+  type == "object" and
+  .status == "finished" and
+  ((.files | type) == "array") and
+  ((.files | length) > 0)
+' >/dev/null <<<"$latest_package"; then
   echo "The finished worker job did not produce a readable project package." >&2
   exit 1
 fi

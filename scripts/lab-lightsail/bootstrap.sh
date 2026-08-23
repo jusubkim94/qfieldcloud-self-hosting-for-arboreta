@@ -991,7 +991,8 @@ echo "Running an isolated schema and storage integrity restore test."
 "$install_root/bin/restore-test.sh"
 
 write_bootstrap_state validating
-if ! "$install_root/bin/health-check.sh" --installation-gate >/dev/null; then
+echo "Installation-gate health-check JSON:"
+if ! "$install_root/bin/health-check.sh" --installation-gate; then
   echo "The complete service, worker, backup, and restore validation gate failed." >&2
   exit 1
 fi
@@ -1005,7 +1006,8 @@ set_install_intent_status complete success
 # failed, so an old success cannot survive a failed retry.
 write_bootstrap_state ready
 
-if ! "$install_root/bin/health-check.sh" >/dev/null; then
+echo "Final health-check JSON:"
+if ! "$install_root/bin/health-check.sh"; then
   echo "The completed installation markers did not pass the final health check." >&2
   exit 1
 fi

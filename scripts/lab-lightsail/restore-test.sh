@@ -71,8 +71,32 @@ for required_command in awk cat chmod date df docker find flock gzip install jq 
     || die "Required command is unavailable: $required_command"
 done
 
+has_root_controlled_ancestors() {
+  local current_path="${1%/*}"
+  local path_metadata=""
+
+  [[ -n $current_path ]] || current_path="/"
+  while :; do
+    if [[ ! -d $current_path || -L $current_path ]] \
+      || [[ $(realpath -e "$current_path") != "$current_path" ]]; then
+      return 1
+    fi
+    path_metadata="$(stat -c '%u:%g:%a' "$current_path")" || return 1
+    [[ $path_metadata =~ ^0:0:[1357][0145][0145]$ ]] || return 1
+    [[ $current_path == "/" ]] && return 0
+    current_path="${current_path%/*}"
+    [[ -n $current_path ]] || current_path="/"
+  done
+}
+
 install_root="${QFC_INSTALL_ROOT:-/opt/qfieldcloud}"
 backup_root="${QFC_BACKUP_ROOT:-/var/backups/qfieldcloud}"
+state_dir="$install_root/state"
+bin_dir="$install_root/bin"
+operational_versions_file="$install_root/versions.env"
+operational_runtime_env="$state_dir/runtime.env"
+operational_compose_file="$install_root/compose.yaml"
+operational_health_check_file="$bin_dir/health-check.sh"
 
 if [[ ! $install_root =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ $install_root == "/" ]] || \
   [[ $install_root == *"//"* ]] || [[ $install_root == *"/../"* ]] || \
@@ -81,7 +105,35 @@ if [[ ! $install_root =~ ^/[A-Za-z0-9._/-]+$ ]] || [[ $install_root == "/" ]] ||
   die "The install and backup roots must be safe absolute paths other than /."
 fi
 
-[[ -d $backup_root ]] || die "No QFieldCloud backup directory is available."
+for trusted_directory in "$install_root" "$state_dir" "$bin_dir"; do
+  if [[ ! -d $trusted_directory || -L $trusted_directory ]] \
+    || [[ $(realpath -e "$trusted_directory") != "$trusted_directory" ]] \
+    || [[ $(stat -c '%u:%g:%a' "$trusted_directory") != "0:0:700" ]]; then
+    die "A trusted QFieldCloud installation directory is unavailable or unsafe."
+  fi
+done
+has_root_controlled_ancestors "$install_root" \
+  || die "The QFieldCloud installation ancestors are not root-controlled."
+for operational_file in "$operational_versions_file" "$operational_runtime_env" \
+  "$operational_compose_file"; do
+  if [[ ! -f $operational_file || -L $operational_file ]] \
+    || [[ $(stat -c '%u:%g:%a' "$operational_file") != "0:0:600" ]]; then
+    die "The operational Compose state is missing or unsafe."
+  fi
+done
+if [[ ! -f $operational_health_check_file || -L $operational_health_check_file \
+      || ! -x $operational_health_check_file ]] \
+  || [[ $(stat -c '%u:%g:%a' "$operational_health_check_file") != "0:0:700" ]]; then
+  die "The operational health-check helper is missing or unsafe."
+fi
+
+if [[ ! -d $backup_root || -L $backup_root ]] \
+  || [[ $(realpath -e "$backup_root") != "$backup_root" ]] \
+  || [[ $(stat -c '%u:%g:%a' "$backup_root") != "0:0:700" ]]; then
+  die "No canonical root-owned QFieldCloud backup directory with mode 0700 is available."
+fi
+has_root_controlled_ancestors "$backup_root" \
+  || die "The backup ancestors are not root-controlled."
 docker info >/dev/null 2>&1 || die "Docker is not running."
 
 docker_architecture="$(docker info --format '{{.Architecture}}')"
@@ -109,7 +161,19 @@ if ! flock -n 9; then
 fi
 
 runtime_temp_root="/run/qfieldcloud"
-install -m 0700 -d "$runtime_temp_root"
+has_root_controlled_ancestors "$runtime_temp_root" \
+  || die "The restore-test runtime ancestors are not root-controlled."
+if [[ -e $runtime_temp_root || -L $runtime_temp_root ]]; then
+  if [[ ! -d $runtime_temp_root || -L $runtime_temp_root ]] \
+    || [[ $(realpath -e "$runtime_temp_root") != "$runtime_temp_root" ]] \
+    || [[ $(stat -c '%u:%g:%a' "$runtime_temp_root") != "0:0:700" ]]; then
+    die "The existing restore-test runtime directory is unsafe."
+  fi
+else
+  install -o root -g root -m 0700 -d "$runtime_temp_root"
+fi
+[[ $(stat -c '%u:%g:%a' "$runtime_temp_root") == "0:0:700" ]] \
+  || die "The restore-test runtime directory ownership or permissions are unsafe."
 stale_runtime_env_files="$(
   find "$runtime_temp_root" -mindepth 1 -maxdepth 1 -type f \
     -name 'restore-test-*.env.*' -printf '%f\n' | LC_ALL=C sort
@@ -120,21 +184,8 @@ if [[ -n $stale_runtime_env_files ]]; then
   die "No stale credential file was removed automatically."
 fi
 
-state_dir="$install_root/state"
-if [[ ! -d $state_dir ]] || [[ -L $state_dir ]] \
-  || [[ $(realpath -e "$state_dir") != "$state_dir" ]]; then
-  die "The trusted QFieldCloud state directory is unavailable."
-fi
 failure_marker_ready="true"
 trap preflight_on_exit EXIT
-operational_versions_file="$install_root/versions.env"
-operational_runtime_env="$state_dir/runtime.env"
-operational_compose_file="$install_root/compose.yaml"
-for operational_file in "$operational_versions_file" "$operational_runtime_env" \
-  "$operational_compose_file"; do
-  [[ -f $operational_file && ! -L $operational_file ]] \
-    || die "The operational Compose state is incomplete."
-done
 
 operational_compose() {
   docker compose \
@@ -210,9 +261,18 @@ done < <(
 backup_root_real="$(realpath -e "$backup_root")"
 backup_dir="$(realpath -e "$backup_root/$latest_backup_name")"
 if [[ $backup_dir != "$backup_root_real/"* ]] \
-  || [[ -L $backup_root/$latest_backup_name ]]; then
+  || [[ -L $backup_root/$latest_backup_name ]] \
+  || [[ $(stat -c '%u:%g:%a' "$backup_dir") != "0:0:700" ]]; then
   die "The selected backup path is unsafe."
 fi
+
+for backup_subdirectory in "$backup_dir/data" "$backup_dir/sensitive"; do
+  if [[ ! -d $backup_subdirectory || -L $backup_subdirectory ]] \
+    || [[ $(realpath -e "$backup_subdirectory") != "$backup_subdirectory" ]] \
+    || [[ $(stat -c '%u:%g:%a' "$backup_subdirectory") != "0:0:700" ]]; then
+    die "The latest backup contains an unsafe directory."
+  fi
+done
 
 required_backup_files=(
   data/database.dump
@@ -231,13 +291,16 @@ for relative_path in "${required_backup_files[@]}"; do
     die "The latest backup is incomplete."
   fi
   backup_file_real="$(realpath -e "$backup_file")"
-  if [[ $backup_file_real != "$backup_dir/"* ]]; then
+  if [[ $backup_file_real != "$backup_dir/"* ]] \
+    || [[ $(stat -c '%u:%g:%a' "$backup_file") != "0:0:600" ]]; then
     die "The latest backup contains an unsafe file path."
   fi
 done
 
 checksums_file="$backup_dir/SHA256SUMS"
-if [[ ! -f $checksums_file ]] || [[ -L $checksums_file ]]; then
+if [[ ! -f $checksums_file ]] || [[ -L $checksums_file ]] \
+  || [[ $(realpath -e "$checksums_file") != "$checksums_file" ]] \
+  || [[ $(stat -c '%u:%g:%a' "$checksums_file") != "0:0:600" ]]; then
   die "The latest backup has no safe checksum manifest."
 fi
 
@@ -631,7 +694,7 @@ cleanup() {
     if operational_compose up -d \
       db rustfs smtp4dev memcached app nginx worker_wrapper ofelia >/dev/null; then
       for _ in $(seq 1 36); do
-        if "$install_root/bin/health-check.sh" --service-only >/dev/null 2>&1; then
+        if "$operational_health_check_file" --service-only >/dev/null 2>&1; then
           operational_recovered="true"
           break
         fi

@@ -26,7 +26,28 @@ for required_command in awk chmod date df docker du flock install jq ln mktemp m
   fi
 done
 
+has_root_controlled_ancestors() {
+  local current_path="${1%/*}"
+  local path_metadata=""
+
+  [[ -n $current_path ]] || current_path="/"
+  while :; do
+    if [[ ! -d $current_path || -L $current_path ]] || \
+      [[ $(realpath -e "$current_path") != "$current_path" ]]; then
+      return 1
+    fi
+    path_metadata="$(stat -c '%u:%g:%a' "$current_path")" || return 1
+    if [[ ! $path_metadata =~ ^0:0:[1357][0145][0145]$ ]]; then
+      return 1
+    fi
+    [[ $current_path == "/" ]] && return 0
+    current_path="${current_path%/*}"
+    [[ -n $current_path ]] || current_path="/"
+  done
+}
+
 state_dir="$install_root/state"
+bin_dir="$install_root/bin"
 versions_file="$install_root/versions.env"
 runtime_env="$state_dir/runtime.env"
 compose_file="$install_root/compose.yaml"
@@ -34,29 +55,53 @@ secrets_file="$state_dir/secrets.env"
 public_host_file="$state_dir/public-host"
 health_check_file="$install_root/bin/health-check.sh"
 
-if [[ ! -d $install_root || -L $install_root ]] || \
-  [[ $(realpath -e "$install_root") != "$install_root" ]] || \
-  [[ ! -d $state_dir || -L $state_dir ]] || \
-  [[ $(realpath -e "$state_dir") != "$state_dir" ]]; then
-  echo "The trusted QFieldCloud installation directories are unavailable." >&2
+for trusted_directory in "$install_root" "$state_dir" "$bin_dir"; do
+  if [[ ! -d $trusted_directory || -L $trusted_directory ]] || \
+    [[ $(realpath -e "$trusted_directory") != "$trusted_directory" ]] || \
+    [[ $(stat -c '%u:%g:%a' "$trusted_directory") != "0:0:700" ]]; then
+    echo "A trusted QFieldCloud installation directory is unavailable or unsafe." >&2
+    exit 1
+  fi
+done
+if ! has_root_controlled_ancestors "$install_root"; then
+  echo "The QFieldCloud installation ancestors are not root-controlled." >&2
   exit 1
 fi
 
 for required_file in "$versions_file" "$runtime_env" "$compose_file" \
-  "$secrets_file" "$public_host_file" "$health_check_file"; do
-  if [[ ! -f $required_file || -L $required_file ]]; then
+  "$secrets_file" "$public_host_file"; do
+  if [[ ! -f $required_file || -L $required_file ]] || \
+    [[ $(stat -c '%u:%g:%a' "$required_file") != "0:0:600" ]]; then
     echo "Required installation state is missing: $required_file" >&2
     exit 1
   fi
 done
-if [[ ! -x $health_check_file ]]; then
-  echo "The installed health-check helper is not executable." >&2
+if [[ ! -f $health_check_file || -L $health_check_file || ! -x $health_check_file ]] || \
+  [[ $(stat -c '%u:%g:%a' "$health_check_file") != "0:0:700" ]]; then
+  echo "The installed health-check helper is missing or unsafe." >&2
   exit 1
 fi
 
-install -m 0700 -d "$backup_root"
-if [[ -L $backup_root ]] || [[ $(realpath -e "$backup_root") != "$backup_root" ]]; then
-  echo "The backup root must be a canonical directory, not a symbolic link." >&2
+backup_parent="${backup_root%/*}"
+[[ -n $backup_parent ]] || backup_parent="/"
+if ! has_root_controlled_ancestors "$backup_root" || \
+  [[ ! -d $backup_parent || -L $backup_parent ]] || \
+  [[ $(realpath -e "$backup_parent") != "$backup_parent" ]]; then
+  echo "The backup parent and its ancestors must be root-controlled and not writable by other users." >&2
+  exit 1
+fi
+if [[ -e $backup_root || -L $backup_root ]]; then
+  if [[ ! -d $backup_root || -L $backup_root ]] || \
+    [[ $(realpath -e "$backup_root") != "$backup_root" ]] || \
+    [[ $(stat -c '%u:%g:%a' "$backup_root") != "0:0:700" ]]; then
+    echo "The existing backup root must be a canonical root-owned directory with mode 0700." >&2
+    exit 1
+  fi
+else
+  install -o root -g root -m 0700 -d "$backup_root"
+fi
+if [[ $(stat -c '%u:%g:%a' "$backup_root") != "0:0:700" ]]; then
+  echo "The backup root ownership or permissions are unsafe." >&2
   exit 1
 fi
 
