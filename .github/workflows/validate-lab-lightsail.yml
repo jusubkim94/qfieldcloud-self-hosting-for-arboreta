@@ -1,0 +1,53 @@
+name: Validate lab-lightsail
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  static-validation:
+    name: Static validation (no AWS API)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the reviewed commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check Bash syntax
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) {
+            throw 'Git for Windows Bash was not found.'
+          }
+          $scripts = Get-ChildItem -LiteralPath scripts/lab-lightsail -Filter '*.sh' -File
+          foreach ($script in $scripts) {
+            & $gitBash -n -- $script.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Bash syntax validation failed: $($script.Name)"
+            }
+          }
+
+      - name: Check onboarding and safety contracts
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            'scripts/lab-lightsail/Test-Onboarding.ps1'
+            'scripts/lab-lightsail/Test-IamPolicies.ps1'
+            'scripts/lab-lightsail/Test-AccessBootstrap.ps1'
+          )
+          foreach ($test in $tests) {
+            & pwsh -NoProfile -File $test
+            if ($LASTEXITCODE -ne 0) {
+              throw "Static contract validation failed: $test"
+            }
+          }
