@@ -1,0 +1,513 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  One-time, same-account IAM access bootstrap for the QFieldCloud lab-lightsail
+  pilot. This template intentionally excludes cleanup and stack-deletion access.
+
+Metadata:
+  QFieldCloudAccessBootstrap:
+    RequiredStackName: qfieldcloud-lab-access
+    RequiredRegion: ap-northeast-2
+    DeploymentRolePathAndName: /qfieldcloud-lab/QFieldCloudLabDeployer
+    DeploymentPolicyPathAndName: /qfieldcloud-lab/QFieldCloudLabDeployer
+    PolicyRevision: '2026-08-23.1'
+    PolicySha256: 22076cfe601c2f192f374a4cc66619fea4e6fbb125f0f7d5169e491f28b5cccb
+    LifecycleSafety:
+      CreateStackWithTerminationProtection: true
+      ResourceDeletionPolicy: Retain
+      ResourceUpdateReplacePolicy: Retain
+      Rationale: >-
+        The access stack must be created with CloudFormation termination protection.
+        The role and managed policy are also retained if that protection is deliberately
+        disabled and the stack is deleted, so an accidental stack operation cannot
+        silently remove deployment access. Remove retained IAM resources only through
+        a separately reviewed administrator cleanup procedure.
+
+Parameters:
+  TrustedPrincipalKind:
+    Type: String
+    AllowedValues:
+      - IamUser
+      - IdentityCenterPermissionSet
+    Description: >-
+      Choose an exact same-account IAM user or one IAM Identity Center permission set.
+
+  TrustedIamUserName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|[A-Za-z0-9+=,.@_-]{1,64}$'
+    ConstraintDescription: >-
+      Leave empty for Identity Center, or enter one pathless IAM user name without
+      an ARN, wildcard, slash, or STS session name.
+    Description: >-
+      Exact pathless IAM user name. The template derives its ARN from this stack's
+      AWS account and partition, preventing cross-account trust.
+
+  IdentityCenterPermissionSetName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|[A-Za-z0-9+=,.@_-]{1,32}$'
+    ConstraintDescription: >-
+      Leave empty for an IAM user, or enter the exact IAM Identity Center permission
+      set name without the AWSReservedSSO_ prefix, suffix, ARN, path, or wildcard.
+    Description: >-
+      Exact permission-set name used in the generated AWSReservedSSO role name.
+
+  IdentityCenterRegion:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|[a-z]{2}(-gov)?-[a-z]+-[0-9]$'
+    ConstraintDescription: >-
+      Leave empty for an IAM user, or enter the IAM Identity Center home Region.
+    Description: >-
+      IAM Identity Center home Region. us-east-1 uses the special unqualified IAM path.
+
+Rules:
+  TrustInputsMustMatchSelectedKind:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::And:
+                - Fn::Equals:
+                    - Ref: TrustedPrincipalKind
+                    - IamUser
+                - Fn::Not:
+                    - Fn::Equals:
+                        - Ref: TrustedIamUserName
+                        - ''
+                - Fn::Equals:
+                    - Ref: IdentityCenterPermissionSetName
+                    - ''
+                - Fn::Equals:
+                    - Ref: IdentityCenterRegion
+                    - ''
+            - Fn::And:
+                - Fn::Equals:
+                    - Ref: TrustedPrincipalKind
+                    - IdentityCenterPermissionSet
+                - Fn::Equals:
+                    - Ref: TrustedIamUserName
+                    - ''
+                - Fn::Not:
+                    - Fn::Equals:
+                        - Ref: IdentityCenterPermissionSetName
+                        - ''
+                - Fn::Not:
+                    - Fn::Equals:
+                        - Ref: IdentityCenterRegion
+                        - ''
+        AssertDescription: >-
+          IAM-user mode requires only TrustedIamUserName. Identity Center mode requires
+          only IdentityCenterPermissionSetName and IdentityCenterRegion.
+
+  SeoulRegionOnly:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: AWS::Region
+            - ap-northeast-2
+        AssertDescription: >-
+          Create the qfieldcloud-lab-access stack only in Seoul (ap-northeast-2).
+
+Conditions:
+  IsIamUser: !Equals
+    - !Ref TrustedPrincipalKind
+    - IamUser
+  IsIdentityCenterHomeUsEast1: !And
+    - !Equals
+      - !Ref TrustedPrincipalKind
+      - IdentityCenterPermissionSet
+    - !Equals
+      - !Ref IdentityCenterRegion
+      - us-east-1
+
+Resources:
+  LabDeploymentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ManagedPolicyName: QFieldCloudLabDeployer
+      Path: /qfieldcloud-lab/
+      Description: >-
+        Least-privilege creation and read access for the fixed qfieldcloud-lab-pilot
+        stack. Cleanup, CloudFormation stack deletion, IAM mutation, and PassRole are
+        intentionally excluded.
+      PolicyDocument: # BEGIN_DEPLOYER_POLICY_JSON
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyCfnGeo",
+              "Effect": "Deny",
+              "Action": "cloudformation:*",
+              "Resource": "*",
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Sid": "DenyLsGeo",
+              "Effect": "Deny",
+              "Action": "lightsail:*",
+              "Resource": "*",
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:RequestedRegion": [
+                    "ap-northeast-2",
+                    "us-east-1"
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Deny",
+              "Action": [
+                "cloudformation:CancelUpdateStack",
+                "cloudformation:ContinueUpdateRollback",
+                "cloudformation:CreateChangeSet",
+                "cloudformation:ExecuteChangeSet",
+                "cloudformation:RollbackStack",
+                "cloudformation:SetStackPolicy",
+                "cloudformation:UpdateStack",
+                "cloudformation:*StackSet*",
+                "cloudformation:*StackInstances*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:ListStacks",
+                "cloudformation:ValidateTemplate"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "cloudformation:CreateStack",
+              "Resource": "arn:aws:cloudformation:ap-northeast-2:*:stack/qfieldcloud-lab-pilot/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2",
+                  "aws:RequestTag/Project": "qfieldcloud-self-hosting",
+                  "aws:RequestTag/DeploymentProfile": "lab-lightsail"
+                },
+                "ForAllValues:StringEquals": {
+                  "cloudformation:ResourceTypes": [
+                    "AWS::CloudFormation::WaitCondition",
+                    "AWS::CloudFormation::WaitConditionHandle",
+                    "AWS::Lightsail::Alarm",
+                    "AWS::Lightsail::Instance",
+                    "AWS::Lightsail::StaticIp"
+                  ]
+                },
+                "Null": {
+                  "cloudformation:ResourceTypes": "false"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:DescribeStacks",
+                "cloudformation:GetStackPolicy",
+                "cloudformation:GetTemplate",
+                "cloudformation:ListStackResources"
+              ],
+              "Resource": "arn:aws:cloudformation:ap-northeast-2:*:stack/qfieldcloud-lab-pilot/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Sid": "ReadLsSeoul",
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:GetAlarms",
+                "lightsail:GetBlueprints",
+                "lightsail:GetBundles",
+                "lightsail:GetDisks",
+                "lightsail:GetInstance",
+                "lightsail:GetInstances",
+                "lightsail:GetInstanceSnapshots",
+                "lightsail:GetInstanceState",
+                "lightsail:GetKeyPairs",
+                "lightsail:GetLoadBalancers",
+                "lightsail:GetRegions",
+                "lightsail:GetStaticIp",
+                "lightsail:GetStaticIps"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Sid": "ReadLsCdn",
+              "Effect": "Allow",
+              "Action": "lightsail:GetDistributions",
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "us-east-1"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "lightsail:CreateInstances",
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2",
+                  "aws:RequestTag/Project": "qfieldcloud-self-hosting",
+                  "aws:RequestTag/DeploymentProfile": "lab-lightsail",
+                  "aws:RequestTag/ManagedBy": "CloudFormation",
+                  "aws:RequestTag/CloudFormationStack": "qfieldcloud-lab-pilot"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "lightsail:TagResource",
+              "Resource": [
+                "arn:aws:lightsail:ap-northeast-2:*:Alarm/*",
+                "arn:aws:lightsail:ap-northeast-2:*:Instance/*",
+                "arn:aws:lightsail:ap-northeast-2:*:StaticIp/*"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Sid": "ManageVm",
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:DeleteInstance",
+                "lightsail:PutInstancePublicPorts"
+              ],
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:Instance/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2",
+                  "aws:ResourceTag/Project": "qfieldcloud-self-hosting",
+                  "aws:ResourceTag/DeploymentProfile": "lab-lightsail",
+                  "aws:ResourceTag/ManagedBy": "CloudFormation",
+                  "aws:ResourceTag/CloudFormationStack": "qfieldcloud-lab-pilot"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Sid": "OperateVm",
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:GetInstanceAccessDetails",
+                "lightsail:RebootInstance",
+                "lightsail:StartInstance",
+                "lightsail:StopInstance"
+              ],
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:Instance/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2",
+                  "aws:ResourceTag/Project": "qfieldcloud-self-hosting",
+                  "aws:ResourceTag/DeploymentProfile": "lab-lightsail",
+                  "aws:ResourceTag/ManagedBy": "CloudFormation",
+                  "aws:ResourceTag/CloudFormationStack": "qfieldcloud-lab-pilot"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "lightsail:AttachStaticIp",
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:Instance/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2",
+                  "aws:ResourceTag/Project": "qfieldcloud-self-hosting",
+                  "aws:ResourceTag/DeploymentProfile": "lab-lightsail",
+                  "aws:ResourceTag/ManagedBy": "CloudFormation",
+                  "aws:ResourceTag/CloudFormationStack": "qfieldcloud-lab-pilot"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "lightsail:AttachStaticIp",
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:StaticIp/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:AllocateStaticIp",
+                "lightsail:DisableAddOn",
+                "lightsail:EnableAddOn"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:DetachStaticIp",
+                "lightsail:ReleaseStaticIp"
+              ],
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:StaticIp/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lightsail:DeleteAlarm",
+                "lightsail:PutAlarm"
+              ],
+              "Resource": "arn:aws:lightsail:ap-northeast-2:*:Alarm/*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                },
+                "ForAnyValue:StringEquals": {
+                  "aws:CalledVia": "cloudformation.amazonaws.com"
+                }
+              }
+            }
+          ]
+        }
+      # END_DEPLOYER_POLICY_JSON
+
+  LabDeploymentRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: QFieldCloudLabDeployer
+      Path: /qfieldcloud-lab/
+      Description: >-
+        Same-account role for creating and validating the fixed QFieldCloud
+        lab-lightsail pilot. It cannot administer IAM or delete its CloudFormation stack.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - !If
+            - IsIamUser
+            - Sid: TrustExactSameAccountIamUser
+              Effect: Allow
+              Action: sts:AssumeRole
+              Principal:
+                AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/${TrustedIamUserName}
+            - !Ref AWS::NoValue
+          - !If
+            - IsIamUser
+            - !Ref AWS::NoValue
+            - Sid: TrustExactSameAccountIdentityCenterPermissionSet
+              Effect: Allow
+              Action: sts:AssumeRole
+              Principal:
+                AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+              Condition:
+                ArnLike:
+                  aws:PrincipalArn: !If
+                    - IsIdentityCenterHomeUsEast1
+                    - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${IdentityCenterPermissionSetName}_*
+                    - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/${IdentityCenterRegion}/AWSReservedSSO_${IdentityCenterPermissionSetName}_*
+                StringEquals:
+                  aws:PrincipalAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - !Ref LabDeploymentPolicy
+      PermissionsBoundary: !Ref LabDeploymentPolicy
+      Tags:
+        - Key: Project
+          Value: qfieldcloud-self-hosting
+        - Key: DeploymentProfile
+          Value: lab-lightsail
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: CloudFormationStack
+          Value: qfieldcloud-lab-access
+        - Key: AccessPurpose
+          Value: pilot-deployment-only
+
+Outputs:
+  DeploymentRoleArn:
+    Description: ARN of the role used by the deployment-only AWS CLI profile.
+    Value: !GetAtt LabDeploymentRole.Arn
+
+  DeploymentPolicyArn:
+    Description: ARN of the managed policy attached as both permissions and boundary.
+    Value: !Ref LabDeploymentPolicy
+
+  TrustedPrincipalKind:
+    Description: Selected same-account trust mode.
+    Value: !Ref TrustedPrincipalKind
+
+  TrustedPrincipalPattern:
+    Description: Exact IAM-user ARN or tightly constrained Identity Center role pattern.
+    Value: !If
+      - IsIamUser
+      - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:user/${TrustedIamUserName}
+      - !If
+        - IsIdentityCenterHomeUsEast1
+        - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${IdentityCenterPermissionSetName}_*
+        - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/${IdentityCenterRegion}/AWSReservedSSO_${IdentityCenterPermissionSetName}_*
+
+  PolicyRevision:
+    Description: Repository-controlled deployment policy revision.
+    Value: '2026-08-23.1'
+
+  PolicySha256:
+    Description: SHA-256 of the compressed semantic JSON deployment policy.
+    Value: 22076cfe601c2f192f374a4cc66619fea4e6fbb125f0f7d5169e491f28b5cccb
+
+  DeletionPermissionsIncluded:
+    Description: Cleanup and CloudFormation stack-deletion permissions are excluded.
+    Value: 'false'

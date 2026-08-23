@@ -1,6 +1,6 @@
 # 운영 실행서
 
-이 디렉터리는 초보 운영자가 순서대로 검토할 수 있는 설계 실행서입니다. Phase 1에는 실행 가능한 자동화가 없으므로 명령 성공을 보장하지 않습니다.
+이 디렉터리는 Phase 1에서 정한 안전 기준과 운영 순서를 보존합니다. 현재 `lab-lightsail`에는 실행 도구가 구현되어 있으므로 정확한 명령·비용·제약은 먼저 [현재 파일럿 안내서](../lab-lightsail.md)를 따릅니다. `standard-aws`는 여전히 설계 단계입니다.
 
 권장 순서: [설치](install.md) → [상태확인](status.md) → [로그](logs.md) → [백업](backup.md) → [복원시험](restore-test.md) → [업데이트](update.md) → [롤백](rollback.md) → [삭제](uninstall.md)
 
