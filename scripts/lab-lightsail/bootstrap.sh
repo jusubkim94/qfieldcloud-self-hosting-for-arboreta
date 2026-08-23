@@ -966,12 +966,14 @@ if [[ $admin_check_exit -eq 3 ]]; then
     app python manage.py shell -c '
 import os
 import sys
-from django.contrib.auth import get_user_model
+from qfieldcloud.core.models import Person
 
 password = sys.stdin.read()
 if not password:
     raise SystemExit("empty bootstrap password")
-get_user_model().objects.create_superuser(
+# QFieldCloud v26.25's AUTH_USER_MODEL is the base User, while initial
+# subscription creation requires the concrete Person row to exist.
+Person.objects.create_superuser(
     username=os.environ["QFC_BOOTSTRAP_ADMIN_USERNAME"],
     email=os.environ["QFC_BOOTSTRAP_ADMIN_EMAIL"],
     password=password,

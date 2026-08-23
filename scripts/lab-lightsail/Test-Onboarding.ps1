@@ -164,6 +164,14 @@ Assert-Contract (
     -not [regex]::IsMatch($bootstrapText, '--entrypoint python\s')
 ) 'The QGIS image verification must use Python 3, preserve startup failures, and accept the official version suffix.'
 Assert-Contract (
+    $bootstrapText.Contains('from qfieldcloud.core.models import Person') -and
+    $bootstrapText.Contains('Person.objects.create_superuser(') -and
+    -not [regex]::IsMatch(
+        $bootstrapText,
+        '(?s)from django\.contrib\.auth import get_user_model.*?get_user_model\(\)\.objects\.create_superuser\('
+    )
+) 'The QFieldCloud administrator must be created as a Person so its initial subscription can reference an existing Person row.'
+Assert-Contract (
     $bootstrapText.Contains('curl --fail --silent --show-error --connect-timeout 5 --max-time 20')
 ) 'The initial HTTPS health gate must bound both connection and total request time.'
 $publicIpRetryPattern = '(?m)^[ \t]*if ! candidate="\$\(curl --fail --silent --show-error --max-time 10 https://checkip\.amazonaws\.com \| tr -d ''\[:space:\]''\)"; then\r?\n[ \t]+candidate=""\r?\n[ \t]*fi[ \t]*$'
