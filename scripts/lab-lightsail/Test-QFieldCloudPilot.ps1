@@ -66,7 +66,8 @@ $blockedCredentialEnvironmentVariables = @(
 )
 
 function Get-AwsExecutable {
-    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue
+    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($command) {
         $candidate = $command.Source
     }

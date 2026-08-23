@@ -60,6 +60,18 @@ foreach ($entry in $scriptTexts.GetEnumerator()) {
         $text.Contains('Get-AuthenticodeSignature -LiteralPath $candidate') -and
         $text.Contains("`$signerName -cne 'Amazon Web Services, Inc.'")
     ) "$($entry.Key) does not verify the AWS Windows executable signature."
+    $applicationLookups = [regex]::Matches(
+        $text,
+        'Get-Command (?:aws|git|pwsh) -CommandType Application -ErrorAction SilentlyContinue'
+    )
+    $singleApplicationLookups = [regex]::Matches(
+        $text,
+        '(?s)Get-Command (?:aws|git|pwsh) -CommandType Application ' +
+            '-ErrorAction SilentlyContinue\s*\|\s*Select-Object -First 1'
+    )
+    Assert-Contract (
+        $applicationLookups.Count -eq $singleApplicationLookups.Count
+    ) "$($entry.Key) does not deterministically select one executable when PATH has duplicates."
     Assert-Contract (
         $text.Contains("StartsWith('AWS_ENDPOINT_URL_', [StringComparison]::OrdinalIgnoreCase)")
     ) "$($entry.Key) does not reject every service-specific AWS endpoint override."
@@ -146,6 +158,7 @@ foreach ($functionName in @(
     'Get-Sha256Hex'
     'Get-ApprovalPlanSha256'
     'Get-ReleaseManifestValue'
+    'Get-GitExecutable'
 )) {
     $functionNodes = @(
         $deployAst.FindAll(
@@ -160,6 +173,16 @@ foreach ($functionName in @(
     Assert-Contract ($functionNodes.Count -eq 1) "Deployer function count changed: $functionName"
     . ([scriptblock]::Create($functionNodes[0].Extent.Text))
 }
+$resolvedGitExecutable = Get-GitExecutable
+Assert-Contract (
+    $resolvedGitExecutable -is [string] -and
+        -not [string]::IsNullOrWhiteSpace($resolvedGitExecutable) -and
+        (Test-Path -LiteralPath $resolvedGitExecutable -PathType Leaf)
+) 'The deployer did not reduce duplicate Git PATH matches to one executable path.'
+$gitVersionOutput = & $resolvedGitExecutable --version 2>$null
+Assert-Contract (
+    $LASTEXITCODE -eq 0 -and ($gitVersionOutput -join ' ') -match '^git version '
+) 'The executable selected from duplicate Git PATH matches is not runnable Git.'
 $manifestCommit = 'c32bc110f8291b2a32e318528ee46689771630d6'
 $manifestDhparamsSha256 = 'a6e3c01dabf4fe5cb32b20e1f84e55a2aa4309159e102867a1ca8fa7e8acd991'
 $manifestLinesWithIntentionalBlanks = @(

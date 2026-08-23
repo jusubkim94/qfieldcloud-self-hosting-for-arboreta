@@ -50,7 +50,8 @@ else {
 }
 
 function Get-AwsExecutable {
-    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue
+    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($command) {
         $candidate = $command.Source
     }
@@ -93,7 +94,8 @@ function Get-AwsExecutable {
 }
 
 function Get-GitExecutable {
-    $command = Get-Command git -CommandType Application -ErrorAction SilentlyContinue
+    $command = Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if (-not $command) {
         throw 'Git을 찾지 못했습니다.'
     }

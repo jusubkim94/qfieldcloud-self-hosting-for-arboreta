@@ -56,7 +56,8 @@ $blockedEnvironmentVariables = @(
 )
 
 function Get-AwsExecutable {
-    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue
+    $command = Get-Command aws -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($command) {
         $candidate = $command.Source
     }
@@ -380,7 +381,8 @@ if ($RoleProfile.Length -gt 64 -or $RoleProfile -notmatch '^[A-Za-z0-9_-]+$' -or
     throw '배포 역할 프로필 이름은 원본과 다른 64자 이하 영숫자·밑줄·하이픈이어야 합니다.'
 }
 
-$gitCommand = Get-Command git -CommandType Application -ErrorAction SilentlyContinue
+$gitCommand = Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if (-not $gitCommand) {
     throw 'Git을 찾지 못했습니다.'
 }
@@ -403,7 +405,8 @@ $deployScript = Join-Path $repositoryRoot 'scripts\lab-lightsail\Deploy-QFieldCl
 if (-not (Test-Path -LiteralPath $deployScript -PathType Leaf)) {
     throw '이 저장소의 검증된 배포 스크립트를 찾지 못했습니다.'
 }
-$pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue
+$pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if (-not $pwshCommand) {
     throw 'PowerShell 7 실행 파일을 찾지 못했습니다.'
 }
