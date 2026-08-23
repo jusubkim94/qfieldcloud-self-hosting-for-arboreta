@@ -779,14 +779,23 @@ prepare_transformation_grids() {
 }
 
 verify_qgis3_image() {
+  local qgis_exit_code=0
   local qgis_output=""
   local qgis_version=""
 
-  qgis_output="$(docker run --rm --network none --entrypoint python \
+  if qgis_output="$(docker run --rm --network none --entrypoint /usr/bin/python3 \
     "$QFC_QGIS3_IMAGE" -c \
-    'from qgis.core import Qgis; print("QFC_QGIS_VERSION=" + Qgis.QGIS_VERSION)' 2>&1)"
+    'from qgis.core import Qgis; print("QFC_QGIS_VERSION=" + Qgis.QGIS_VERSION)' 2>&1)"; then
+    :
+  else
+    qgis_exit_code=$?
+    echo "The pinned QGIS 3 image could not run its Python 3 verification (exit code $qgis_exit_code)." >&2
+    printf '%s\n' "$qgis_output" >&2
+    exit "$qgis_exit_code"
+  fi
   qgis_version="$(sed -n 's/^QFC_QGIS_VERSION=//p' <<<"$qgis_output" | tail -n 1 | tr -d '\r')"
-  if [[ $qgis_version != "$QFC_QGIS3_EXPECTED_VERSION" ]]; then
+  if [[ $qgis_version != "$QFC_QGIS3_EXPECTED_VERSION" ]] && \
+    [[ $qgis_version != "$QFC_QGIS3_EXPECTED_VERSION"-* ]]; then
     echo "The pinned QGIS 3 image reported an unexpected version." >&2
     exit 1
   fi
@@ -896,7 +905,8 @@ for _ in $(seq 1 36); do
   # QFieldCloud v26.25 caches this view for 60 seconds. Force each readiness
   # attempt to observe the current database and object-storage connections.
   status_nonce="$(date -u +%s%N)-$$-${RANDOM}"
-  status_json="$(curl --fail --silent --show-error --cacert "$cert_root/qfieldcloud.pem" \
+  status_json="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
+    --cacert "$cert_root/qfieldcloud.pem" \
     --resolve "$public_host:443:127.0.0.1" \
     "https://$public_host/api/v1/status/?bootstrap_nonce=$status_nonce" || true)"
   if jq -e '.database == "ok" and .storage == "ok"' >/dev/null 2>&1 <<<"$status_json"; then

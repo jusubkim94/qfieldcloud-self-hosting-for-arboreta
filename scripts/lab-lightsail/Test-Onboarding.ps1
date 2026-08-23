@@ -40,6 +40,11 @@ function Get-CheckedScriptText {
 }
 
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$bootstrapPath = Join-Path $PSScriptRoot 'bootstrap.sh'
+Assert-Contract (
+    Test-Path -LiteralPath $bootstrapPath -PathType Leaf
+) "Missing script: $bootstrapPath"
+$bootstrapText = Get-Content -Raw -LiteralPath $bootstrapPath
 $scriptPaths = [ordered]@{
     Deploy  = Join-Path $PSScriptRoot 'Deploy-QFieldCloudPilot.ps1'
     Verify  = Join-Path $PSScriptRoot 'Test-QFieldCloudPilot.ps1'
@@ -146,6 +151,16 @@ Assert-Contract (
     $deployText.Contains('-TargetAccountId $ExpectedAccountId') -and
     -not $deployText.Contains('TargetAccountId              = $ExpectedAccountId')
 ) 'The approval hash is not bound to the target account or the account ID is exposed in the displayed plan.'
+Assert-Contract (
+    $bootstrapText.Contains('--entrypoint /usr/bin/python3 ') -and
+    $bootstrapText.Contains('The pinned QGIS 3 image could not run its Python 3 verification (exit code $qgis_exit_code).') -and
+    $bootstrapText.Contains('exit "$qgis_exit_code"') -and
+    $bootstrapText.Contains('[[ $qgis_version != "$QFC_QGIS3_EXPECTED_VERSION"-* ]]') -and
+    -not [regex]::IsMatch($bootstrapText, '--entrypoint python\s')
+) 'The QGIS image verification must use Python 3, preserve startup failures, and accept the official version suffix.'
+Assert-Contract (
+    $bootstrapText.Contains('curl --fail --silent --show-error --connect-timeout 5 --max-time 20')
+) 'The initial HTTPS health gate must bound both connection and total request time.'
 
 $deployTokens = $null
 $deployErrors = $null
