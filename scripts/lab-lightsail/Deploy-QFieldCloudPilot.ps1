@@ -45,6 +45,8 @@ $repositoryOwner = 'jusubkim94'
 $repositoryName = 'qfieldcloud-self-hosting-for-arboreta'
 $expectedOrigin = "https://github.com/$repositoryOwner/$repositoryName.git"
 $bootstrapPath = 'scripts/lab-lightsail/bootstrap.sh'
+$releaseManifestPath = 'config/qfieldcloud-v26.25.env'
+$qfieldCloudRawBase = 'https://raw.githubusercontent.com/opengisch/QFieldCloud'
 $blueprintId = 'ubuntu_24_04'
 $bundleId = 'medium_3_0'
 $snapshotStorageUsdPerGbMonth = [decimal]0.05
@@ -172,6 +174,59 @@ function Get-Sha256Hex {
     }
 }
 
+function Get-PinnedHttpsBytes {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^https://[A-Za-z0-9./_-]+$')]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 2097152)]
+        [int]$MaximumBytes,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('bootstrap', 'upstream-dhparams')]
+        [string]$Artifact
+    )
+
+    $httpClient = [System.Net.Http.HttpClient]::new()
+    try {
+        $httpClient.Timeout = [TimeSpan]::FromSeconds(60)
+        try {
+            $bytes = $httpClient.GetByteArrayAsync($Uri).GetAwaiter().GetResult()
+        }
+        catch {
+            throw "고정된 $Artifact 파일을 HTTPS로 내려받지 못했습니다."
+        }
+        if ($null -eq $bytes -or $bytes.Length -lt 1 -or $bytes.Length -gt $MaximumBytes) {
+            throw "고정된 $Artifact 파일 크기가 허용 범위를 벗어났습니다."
+        }
+        return [byte[]]$bytes
+    }
+    finally {
+        $httpClient.Dispose()
+    }
+}
+
+function Get-ReleaseManifestValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('QFIELDCLOUD_COMMIT', 'QFIELDCLOUD_DHPARAM_SHA256')]
+        [string]$Name
+    )
+
+    $matches = @(
+        $Lines | Where-Object { $_ -match ('^' + [regex]::Escape($Name) + '=') }
+    )
+    if ($matches.Count -ne 1) {
+        throw "릴리스 manifest의 $Name 값이 정확히 하나가 아닙니다."
+    }
+    return ([string]$matches[0]).Substring($Name.Length + 1)
+}
+
 function Test-StackExists {
     $arguments = @(
         'cloudformation', 'describe-stacks',
@@ -222,29 +277,44 @@ if ($LASTEXITCODE -ne 0 -or $bootstrapRevision -notmatch '^[0-9a-f]{40}$') {
 
 $bootstrapFile = Join-Path $repositoryRoot ($bootstrapPath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
 $templateFile = Join-Path $repositoryRoot 'infra\lab-lightsail\template.yaml'
+$releaseManifestFile = Join-Path $repositoryRoot ($releaseManifestPath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
 if (-not (Test-Path -LiteralPath $bootstrapFile -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $templateFile -PathType Leaf)) {
-    throw '부트스트랩 또는 CloudFormation 템플릿 파일이 없습니다.'
+    -not (Test-Path -LiteralPath $templateFile -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $releaseManifestFile -PathType Leaf)) {
+    throw '부트스트랩, 릴리스 manifest 또는 CloudFormation 템플릿 파일이 없습니다.'
 }
 
 $bootstrapBytes = [System.IO.File]::ReadAllBytes($bootstrapFile)
 $bootstrapSha256 = Get-Sha256Hex -Bytes $bootstrapBytes
 $rawUrl = "https://raw.githubusercontent.com/$repositoryOwner/$repositoryName/$bootstrapRevision/$bootstrapPath"
-try {
-    $rawResponse = Invoke-WebRequest -Uri $rawUrl -UseBasicParsing
-}
-catch {
-    throw '현재 commit의 부트스트랩을 공개 GitHub에서 내려받지 못했습니다. 먼저 기능 브랜치를 Push하세요.'
-}
-if ($rawResponse.Content -is [byte[]]) {
-    $remoteBytes = [byte[]]$rawResponse.Content
-}
-else {
-    $remoteBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$rawResponse.Content)
-}
+$remoteBytes = Get-PinnedHttpsBytes `
+    -Uri $rawUrl `
+    -MaximumBytes 2097152 `
+    -Artifact bootstrap
 $remoteSha256 = Get-Sha256Hex -Bytes $remoteBytes
 if ($remoteSha256 -ne $bootstrapSha256) {
     throw '공개 GitHub의 부트스트랩과 로컬 commit 파일의 SHA-256이 다릅니다.'
+}
+
+$releaseManifestLines = @(Get-Content -LiteralPath $releaseManifestFile)
+$qfieldCloudCommit = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name QFIELDCLOUD_COMMIT
+$expectedDhparamsSha256 = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name QFIELDCLOUD_DHPARAM_SHA256
+if ($qfieldCloudCommit -notmatch '^[0-9a-f]{40}$' -or
+    $expectedDhparamsSha256 -notmatch '^[0-9a-f]{64}$') {
+    throw 'QFieldCloud 릴리스 manifest의 고정 commit 또는 DH parameters SHA-256 형식이 잘못되었습니다.'
+}
+$dhparamsUrl = "$qfieldCloudRawBase/$qfieldCloudCommit/conf/nginx/dhparams/ssl-dhparams.pem"
+$dhparamsBytes = Get-PinnedHttpsBytes `
+    -Uri $dhparamsUrl `
+    -MaximumBytes 16384 `
+    -Artifact upstream-dhparams
+$actualDhparamsSha256 = Get-Sha256Hex -Bytes $dhparamsBytes
+if ($actualDhparamsSha256 -cne $expectedDhparamsSha256) {
+    throw '공식 QFieldCloud commit의 DH parameters 바이트와 릴리스 manifest의 SHA-256이 다릅니다. AWS 자원은 만들지 않습니다.'
 }
 
 $identity = Invoke-AwsJson -Arguments @('sts', 'get-caller-identity')
@@ -379,6 +449,7 @@ $plan = [pscustomobject]@{
     CloudFormationResourceTypes    = $allowedCloudFormationResourceTypes -join ','
     BootstrapRevision              = $bootstrapRevision
     BootstrapSha256                = $bootstrapSha256
+    UpstreamDhparams               = 'official-commit-bytes-verified'
     ExistingArboretumDatabaseScope = 'not-accessed'
 }
 

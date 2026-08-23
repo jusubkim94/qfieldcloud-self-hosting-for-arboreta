@@ -356,5 +356,11 @@ Assert-Contract (Test-ExactSet -Actual $deployResourceTypes -Expected $allowedRe
 Assert-Contract ($deployScriptText -match "(?s)\[ValidateSet\('qfieldcloud-lab-pilot'\)\]\s*\[string\]\`$StackName") '배포 스크립트의 StackName이 고정되지 않았습니다.'
 Assert-Contract ($deployScriptText -match "(?s)\[ValidateSet\('qfieldcloud-lab-pilot'\)\]\s*\[string\]\`$InstanceName") '배포 스크립트의 InstanceName이 고정되지 않았습니다.'
 Assert-Contract ($testScriptText -match "(?s)\[ValidateSet\('qfieldcloud-lab-pilot'\)\]\s*\[string\]\`$StackName") '검증 스크립트의 StackName이 고정되지 않았습니다.'
+Assert-Contract ($deployScriptText.Contains("`$releaseManifestPath = 'config/qfieldcloud-v26.25.env'")) '배포 전 릴리스 manifest 경로가 고정되지 않았습니다.'
+Assert-Contract ($deployScriptText.Contains("`$qfieldCloudRawBase = 'https://raw.githubusercontent.com/opengisch/QFieldCloud'")) '공식 QFieldCloud raw source가 고정되지 않았습니다.'
+Assert-Contract ($deployScriptText.Contains('function Get-PinnedHttpsBytes')) '배포 스크립트가 원격 파일의 원본 바이트를 읽지 않습니다.'
+Assert-Contract ($deployScriptText.Contains('-Name QFIELDCLOUD_DHPARAM_SHA256')) '배포 스크립트가 DH parameters 고정값을 읽지 않습니다.'
+Assert-Contract ($deployScriptText.Contains("-Artifact upstream-dhparams")) '배포 스크립트가 공식 DH parameters를 배포 전에 확인하지 않습니다.'
+Assert-Contract ($deployScriptText.Contains("UpstreamDhparams               = 'official-commit-bytes-verified'")) '배포 계획에 공식 DH parameters 검증 결과가 없습니다.'
 
 Write-Host 'IAM 정책 정적 계약을 확인했습니다. AWS API는 호출하지 않았습니다.'
