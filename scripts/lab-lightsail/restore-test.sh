@@ -141,21 +141,92 @@ if [[ $docker_architecture != "x86_64" && $docker_architecture != "amd64" ]]; th
   die "The restore test supports only linux/amd64."
 fi
 
-maintenance_lock_file="/var/lock/qfieldcloud-maintenance.lock"
+readonly qfc_lock_parent="/var/lib/qfieldcloud"
+readonly qfc_lock_root="$qfc_lock_parent/locks"
+prepare_lock_directory() {
+  local lock_path=""
+  local path_metadata=""
+  local trusted_ancestor=""
+
+  for trusted_ancestor in / /var /var/lib; do
+    [[ -d $trusted_ancestor && ! -L $trusted_ancestor ]] || return 1
+    [[ $(realpath -e "$trusted_ancestor") == "$trusted_ancestor" ]] || return 1
+    path_metadata="$(stat -c '%u:%g:%a' "$trusted_ancestor")" || return 1
+    [[ $path_metadata =~ ^0:0:[1357][0145][0145]$ ]] || return 1
+  done
+
+  for lock_path in "$qfc_lock_parent" "$qfc_lock_root"; do
+    if [[ -e $lock_path || -L $lock_path ]]; then
+      [[ -d $lock_path && ! -L $lock_path ]] || return 1
+    else
+      install -o root -g root -m 0700 -d -- "$lock_path" || return 1
+    fi
+    [[ $(realpath -e "$lock_path") == "$lock_path" ]] || return 1
+    [[ $(stat -c '%u:%g:%a' "$lock_path") == "0:0:700" ]] || return 1
+  done
+}
+prepare_lock_file() {
+  local lock_file="$1"
+  local lock_tmp=""
+
+  [[ $lock_file == "$qfc_lock_root/"* ]] || return 1
+  if [[ -e $lock_file || -L $lock_file ]]; then
+    [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  else
+    lock_tmp="$(mktemp "$qfc_lock_root/.lock.XXXXXX")" || return 1
+    if ! chmod 0600 "$lock_tmp" \
+      || [[ $(stat -c '%u:%g:%a' "$lock_tmp") != "0:0:600" ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    if ! ln -T -- "$lock_tmp" "$lock_file" 2>/dev/null \
+      && [[ ! -e $lock_file && ! -L $lock_file ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    rm -f -- "$lock_tmp" || return 1
+  fi
+  [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  [[ $(realpath -e "$lock_file") == "$lock_file" ]] || return 1
+  [[ $(stat -c '%u:%g:%a' "$lock_file") == "0:0:600" ]] || return 1
+}
+lock_fd_matches_file() {
+  local lock_fd="$1"
+  local lock_file="$2"
+  local fd_identity=""
+  local file_identity=""
+
+  [[ $lock_fd =~ ^[0-9]+$ && -e /proc/$$/fd/$lock_fd ]] || return 1
+  fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$lock_fd")" || return 1
+  file_identity="$(stat -c '%d:%i' "$lock_file")" || return 1
+  [[ $fd_identity == "$file_identity" ]]
+}
+
+prepare_lock_directory || die "The root-owned QFieldCloud lock directory is missing or unsafe."
+maintenance_lock_file="$qfc_lock_root/maintenance.lock"
+restore_test_lock_file="$qfc_lock_root/restore-test.lock"
+prepare_lock_file "$maintenance_lock_file" \
+  || die "The QFieldCloud maintenance lock file is missing or unsafe."
+prepare_lock_file "$restore_test_lock_file" \
+  || die "The QFieldCloud restore-test lock file is missing or unsafe."
 inherited_lock="false"
 if [[ ${QFC_MAINTENANCE_LOCK_FD:-} == "8" ]] && [[ -e /proc/$$/fd/8 ]] && \
-  [[ $(readlink -f /proc/$$/fd/8) == "$(readlink -f "$maintenance_lock_file")" ]]; then
+  lock_fd_matches_file 8 "$maintenance_lock_file"; then
   inherited_lock="true"
 fi
 if [[ $inherited_lock != "true" ]]; then
-  exec 8>"$maintenance_lock_file"
-  if ! flock -n 8; then
-    die "Another QFieldCloud maintenance operation is already running."
-  fi
-  export QFC_MAINTENANCE_LOCK_FD=8
+  exec 8>>"$maintenance_lock_file"
+  lock_fd_matches_file 8 "$maintenance_lock_file" \
+    || die "The QFieldCloud maintenance lock descriptor changed unexpectedly."
 fi
+if ! flock -n 8; then
+  die "Another QFieldCloud maintenance operation is already running."
+fi
+export QFC_MAINTENANCE_LOCK_FD=8
 
-exec 9>/var/lock/qfieldcloud-restore-test.lock
+exec 9>>"$restore_test_lock_file"
+lock_fd_matches_file 9 "$restore_test_lock_file" \
+  || die "The QFieldCloud restore-test lock descriptor changed unexpectedly."
 if ! flock -n 9; then
   die "Another QFieldCloud restore test is already running."
 fi
@@ -782,6 +853,8 @@ done
 
 failure_stage="operational-service-quiesce"
 echo "Quiescing the operational pilot during the isolated integrity test."
+write_recovery_required "restore-test-maintenance-in-progress" \
+  || die "The durable recovery-required marker could not be created; no operational service was stopped."
 operational_services_quiesced="true"
 operational_compose stop nginx ofelia
 operational_compose stop --timeout 900 worker_wrapper

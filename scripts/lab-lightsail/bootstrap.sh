@@ -100,8 +100,8 @@ if ! command -v timeout >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p /var/log/qfieldcloud /var/lib/qfieldcloud
-chmod 0700 /var/log/qfieldcloud /var/lib/qfieldcloud
+mkdir -p /var/log/qfieldcloud
+chmod 0700 /var/log/qfieldcloud
 readonly log_file="/var/log/qfieldcloud/bootstrap.log"
 touch "$log_file"
 chmod 0600 "$log_file"
@@ -174,7 +174,93 @@ on_exit() {
 }
 trap 'on_exit $?' EXIT
 
-exec 8>/var/lock/qfieldcloud-maintenance.lock
+readonly qfc_lock_parent="/var/lib/qfieldcloud"
+readonly qfc_lock_root="$qfc_lock_parent/locks"
+prepare_lock_directory() {
+  local lock_path=""
+  local path_metadata=""
+  local trusted_ancestor=""
+
+  for trusted_ancestor in / /var /var/lib; do
+    [[ -d $trusted_ancestor && ! -L $trusted_ancestor ]] || return 1
+    [[ $(realpath -e "$trusted_ancestor") == "$trusted_ancestor" ]] || return 1
+    path_metadata="$(stat -c '%u:%g:%a' "$trusted_ancestor")" || return 1
+    [[ $path_metadata =~ ^0:0:[1357][0145][0145]$ ]] || return 1
+  done
+
+  for lock_path in "$qfc_lock_parent" "$qfc_lock_root"; do
+    if [[ -e $lock_path || -L $lock_path ]]; then
+      [[ -d $lock_path && ! -L $lock_path ]] || return 1
+    else
+      install -o root -g root -m 0700 -d -- "$lock_path" || return 1
+    fi
+    [[ $(realpath -e "$lock_path") == "$lock_path" ]] || return 1
+    [[ $(stat -c '%u:%g:%a' "$lock_path") == "0:0:700" ]] || return 1
+  done
+}
+prepare_lock_file() {
+  local lock_file="$1"
+  local lock_tmp=""
+
+  [[ $lock_file == "$qfc_lock_root/"* ]] || return 1
+  if [[ -e $lock_file || -L $lock_file ]]; then
+    [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  else
+    lock_tmp="$(mktemp "$qfc_lock_root/.lock.XXXXXX")" || return 1
+    if ! chmod 0600 "$lock_tmp" \
+      || [[ $(stat -c '%u:%g:%a' "$lock_tmp") != "0:0:600" ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    if ! ln -T -- "$lock_tmp" "$lock_file" 2>/dev/null \
+      && [[ ! -e $lock_file && ! -L $lock_file ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    rm -f -- "$lock_tmp" || return 1
+  fi
+  [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  [[ $(realpath -e "$lock_file") == "$lock_file" ]] || return 1
+  [[ $(stat -c '%u:%g:%a' "$lock_file") == "0:0:600" ]] || return 1
+}
+lock_fd_matches_file() {
+  local lock_fd="$1"
+  local lock_file="$2"
+  local fd_identity=""
+  local file_identity=""
+
+  [[ $lock_fd =~ ^[0-9]+$ && -e /proc/$$/fd/$lock_fd ]] || return 1
+  fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$lock_fd")" || return 1
+  file_identity="$(stat -c '%d:%i' "$lock_file")" || return 1
+  [[ $fd_identity == "$file_identity" ]]
+}
+
+for required_lock_command in chmod flock install ln mktemp realpath rm stat; do
+  command -v "$required_lock_command" >/dev/null 2>&1 || {
+    echo "Required lock command is unavailable: $required_lock_command" >&2
+    exit 1
+  }
+done
+prepare_lock_directory || {
+  echo "The root-owned QFieldCloud lock directory is missing or unsafe." >&2
+  exit 1
+}
+maintenance_lock_file="$qfc_lock_root/maintenance.lock"
+bootstrap_lock_file="$qfc_lock_root/bootstrap.lock"
+prepare_lock_file "$maintenance_lock_file" || {
+  echo "The QFieldCloud maintenance lock file is missing or unsafe." >&2
+  exit 1
+}
+prepare_lock_file "$bootstrap_lock_file" || {
+  echo "The QFieldCloud bootstrap lock file is missing or unsafe." >&2
+  exit 1
+}
+
+exec 8>>"$maintenance_lock_file"
+if ! lock_fd_matches_file 8 "$maintenance_lock_file"; then
+  echo "The QFieldCloud maintenance lock descriptor changed unexpectedly." >&2
+  exit 1
+fi
 if ! flock -n 8; then
   echo "Another QFieldCloud maintenance operation is already running." >&2
   exit 1
@@ -185,7 +271,11 @@ export QFC_MAINTENANCE_LOCK_FD=8
 bootstrap_state_managed="true"
 write_bootstrap_state running
 
-exec 9>/var/lock/qfieldcloud-bootstrap.lock
+exec 9>>"$bootstrap_lock_file"
+if ! lock_fd_matches_file 9 "$bootstrap_lock_file"; then
+  echo "The QFieldCloud bootstrap lock descriptor changed unexpectedly." >&2
+  exit 1
+fi
 if ! flock -n 9; then
   echo "Another QFieldCloud bootstrap process is already running." >&2
   exit 1
@@ -497,7 +587,9 @@ discover_public_ipv4() {
   local attempts_remaining=18
 
   while ((attempts_remaining > 0)); do
-    candidate="$(curl --fail --silent --show-error --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')"
+    if ! candidate="$(curl --fail --silent --show-error --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')"; then
+      candidate=""
+    fi
     if [[ $candidate =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
       if [[ $candidate == "$previous_ip" ]]; then
         stable_count=$((stable_count + 1))

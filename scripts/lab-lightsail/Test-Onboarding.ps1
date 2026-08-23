@@ -166,6 +166,14 @@ Assert-Contract (
 Assert-Contract (
     $bootstrapText.Contains('curl --fail --silent --show-error --connect-timeout 5 --max-time 20')
 ) 'The initial HTTPS health gate must bound both connection and total request time.'
+$publicIpRetryPattern = '(?m)^[ \t]*if ! candidate="\$\(curl --fail --silent --show-error --max-time 10 https://checkip\.amazonaws\.com \| tr -d ''\[:space:\]''\)"; then\r?\n[ \t]+candidate=""\r?\n[ \t]*fi[ \t]*$'
+$nakedPublicIpFetchPattern = '(?m)^[ \t]*candidate="\$\(curl --fail --silent --show-error --max-time 10 https://checkip\.amazonaws\.com \| tr -d ''\[:space:\]''\)"[ \t]*$'
+Assert-Contract (
+    [regex]::IsMatch($bootstrapText, $publicIpRetryPattern) -and
+    -not [regex]::IsMatch($bootstrapText, $nakedPublicIpFetchPattern) -and
+    $bootstrapText.Contains('local attempts_remaining=18') -and
+    $bootstrapText.Contains('attempts_remaining=$((attempts_remaining - 1))')
+) 'Public IPv4 transport failures bypass the bounded retry loop under errexit/pipefail.'
 Assert-Contract (
     $bootstrapText.Contains('echo "Installation-gate health-check JSON:"') -and
     $bootstrapText.Contains('if ! "$install_root/bin/health-check.sh" --installation-gate; then') -and
@@ -181,19 +189,111 @@ Assert-Contract (
     $bootstrapText.Contains('chmod 0600 "$log_file"') -and
     $bootstrapText.Contains('exec > >(tee -a "$log_file") 2>&1')
 ) 'The inner bootstrap diagnosis log is not pinned to its root-only 0600 contract.'
+$lockScriptTexts = [ordered]@{
+    Bootstrap   = $bootstrapText
+    Backup      = $backupText
+    RestoreTest = $restoreTestText
+    WorkerSmoke = $workerSmokeText
+}
+foreach ($lockScript in $lockScriptTexts.GetEnumerator()) {
+    Assert-Contract (
+        $lockScript.Value.Contains('readonly qfc_lock_parent="/var/lib/qfieldcloud"') -and
+        $lockScript.Value.Contains('readonly qfc_lock_root="$qfc_lock_parent/locks"') -and
+        $lockScript.Value.Contains('for trusted_ancestor in / /var /var/lib; do') -and
+        $lockScript.Value.Contains('install -o root -g root -m 0700 -d -- "$lock_path"') -and
+        $lockScript.Value.Contains('[[ $(stat -c ''%u:%g:%a'' "$lock_path") == "0:0:700" ]]') -and
+        [regex]::Matches(
+            $lockScript.Value,
+            '\[\[ -f \$lock_file && ! -L \$lock_file \]\] \|\| return 1'
+        ).Count -ge 2 -and
+        $lockScript.Value.Contains('lock_tmp="$(mktemp "$qfc_lock_root/.lock.XXXXXX")"') -and
+        $lockScript.Value.Contains('ln -T -- "$lock_tmp" "$lock_file"') -and
+        $lockScript.Value.Contains('&& [[ ! -e $lock_file && ! -L $lock_file ]]') -and
+        -not $lockScript.Value.Contains('install -o root -g root -m 0600 /dev/null "$lock_file"') -and
+        $lockScript.Value.Contains('[[ $(stat -c ''%u:%g:%a'' "$lock_file") == "0:0:600" ]]') -and
+        $lockScript.Value.Contains('stat -Lc ''%d:%i'' "/proc/$$/fd/$lock_fd"') -and
+        $lockScript.Value.Contains('flock -n 8') -and
+        $lockScript.Value.Contains('flock -n 9') -and
+        -not $lockScript.Value.Contains('/var/lock/qfieldcloud')
+    ) "$($lockScript.Key) can follow or replace an attacker-controlled maintenance lock."
+}
+Assert-Contract (
+    -not $bootstrapText.Contains('mkdir -p /var/log/qfieldcloud /var/lib/qfieldcloud') -and
+    -not $bootstrapText.Contains('chmod 0700 /var/log/qfieldcloud /var/lib/qfieldcloud')
+) 'Bootstrap mutates the persistent lock parent before validating that it is not a symlink.'
+$backupMaintenanceMarkerIndex = $backupText.IndexOf(
+    'write_recovery_required "backup-maintenance-in-progress"',
+    [StringComparison]::Ordinal
+)
+$backupFirstStopIndex = $backupText.IndexOf(
+    'compose stop nginx ofelia',
+    [StringComparison]::Ordinal
+)
+$backupSuccessMarkerRemovalIndex = $backupText.IndexOf(
+    'remove_owned_recovery_marker || {',
+    $backupMaintenanceMarkerIndex,
+    [StringComparison]::Ordinal
+)
+$backupQuiescedFalseIndex = $backupText.IndexOf(
+    'services_quiesced="false"',
+    $backupSuccessMarkerRemovalIndex,
+    [StringComparison]::Ordinal
+)
+Assert-Contract (
+    $backupMaintenanceMarkerIndex -ge 0 -and
+    $backupFirstStopIndex -gt $backupMaintenanceMarkerIndex -and
+    $backupText.Contains('The durable recovery-required marker could not be created; no service was stopped.') -and
+    $backupSuccessMarkerRemovalIndex -gt $backupFirstStopIndex -and
+    $backupQuiescedFalseIndex -gt $backupSuccessMarkerRemovalIndex
+) 'Backup can stop services without a durable recovery marker or publish success before removing it.'
+$restoreMaintenanceMarkerIndex = $restoreTestText.IndexOf(
+    'write_recovery_required "restore-test-maintenance-in-progress"',
+    [StringComparison]::Ordinal
+)
+$restoreFirstStopIndex = $restoreTestText.IndexOf(
+    'operational_compose stop nginx ofelia',
+    [StringComparison]::Ordinal
+)
+$restoreCleanupIndex = $restoreTestText.IndexOf('cleanup() {', [StringComparison]::Ordinal)
+$restoreRecoveryHealthIndex = $restoreTestText.IndexOf(
+    'if [[ $operational_recovered != "true" ]]',
+    $restoreCleanupIndex,
+    [StringComparison]::Ordinal
+)
+$restoreMarkerRemovalIndex = $restoreTestText.IndexOf(
+    'remove_owned_recovery_marker || cleanup_failed=1',
+    $restoreRecoveryHealthIndex,
+    [StringComparison]::Ordinal
+)
+Assert-Contract (
+    $restoreMaintenanceMarkerIndex -ge 0 -and
+    $restoreFirstStopIndex -gt $restoreMaintenanceMarkerIndex -and
+    $restoreTestText.Contains('The durable recovery-required marker could not be created; no operational service was stopped.') -and
+    $restoreCleanupIndex -ge 0 -and
+    $restoreRecoveryHealthIndex -gt $restoreCleanupIndex -and
+    $restoreMarkerRemovalIndex -gt $restoreRecoveryHealthIndex
+) 'Restore testing can stop services without a durable marker or clear it before recovery health passes.'
 Assert-Contract (
     $workerSmokeText.Contains('readonly job_wait_timeout_seconds=1200') -and
     $workerSmokeText.Contains('readonly job_poll_request_cap_seconds=20') -and
     $workerSmokeText.Contains('--connect-timeout 5') -and
     $workerSmokeText.Contains('IFS='' '' read -r uptime_seconds _ </proc/uptime') -and
-    $workerSmokeText.Contains('deadline=$((now + job_wait_timeout_seconds))') -and
+    $workerSmokeText.Contains('worker_smoke_deadline=$((worker_smoke_started_monotonic + job_wait_timeout_seconds))') -and
+    $workerSmokeText.Contains('local deadline="$3"') -and
+    $workerSmokeText.Contains('discovery_remaining=$((worker_smoke_deadline - discovery_now))') -and
+    $workerSmokeText.Contains('if ((shared_deadline < deadline)); then') -and
+    $workerSmokeText.Contains('deadline=$shared_deadline') -and
+    $workerSmokeText.Contains('wait_for_job "$create_job_id" "create-project" "$worker_smoke_deadline"') -and
+    $workerSmokeText.Contains('wait_for_job "$process_job_id" "process-projectfile" "$worker_smoke_deadline"') -and
+    $workerSmokeText.Contains('wait_for_job "$package_job_id" "package" "$worker_smoke_deadline"') -and
     $workerSmokeText.Contains('request_timeout=$remaining') -and
     $workerSmokeText.Contains('api_get_fresh "$base_url/jobs/$job_id/" "$request_timeout"') -and
     $workerSmokeText.Contains('sleep_seconds=$remaining') -and
     $workerSmokeText.Contains('local timeout_seconds="$1"') -and
     $workerSmokeText.Contains('curl "${curl_common[@]}" --max-time "$timeout_seconds"') -and
+    -not $workerSmokeText.Contains('deadline=$((now + job_wait_timeout_seconds))') -and
     -not $workerSmokeText.Contains('seq 1 120')
-) 'The worker wait is not bounded by a real 20-minute monotonic deadline.'
+) 'The three worker jobs do not share one real 20-minute monotonic deadline.'
 Assert-Contract (
     $workerSmokeText.Contains('docker container ls --all --no-trunc --quiet --filter "id=$container_id"') -and
     $workerSmokeText.Contains('Docker could not verify temporary QGIS worker container cleanup.') -and
@@ -205,6 +305,71 @@ Assert-Contract (
     $workerSmokeText.Contains('((.files | type) == "array")') -and
     $workerSmokeText.Contains('((.files | length) > 0)')
 ) 'The worker smoke test can accept an empty QGIS filename or package.'
+$processDiscoveryIndex = $workerSmokeText.IndexOf(
+    'if ! process_job_id="$(wait_for_single_project_job_type',
+    [StringComparison]::Ordinal
+)
+$createWaitIndex = $workerSmokeText.IndexOf(
+    'wait_for_job "$create_job_id" "create-project"',
+    [StringComparison]::Ordinal
+)
+$createContainerIndex = $workerSmokeText.IndexOf(
+    'verify_removed_worker_container "$create_job_id"',
+    [StringComparison]::Ordinal
+)
+$processWaitIndex = $workerSmokeText.IndexOf(
+    'wait_for_job "$process_job_id" "process-projectfile"',
+    [StringComparison]::Ordinal
+)
+$processContainerIndex = $workerSmokeText.IndexOf(
+    'verify_removed_worker_container "$process_job_id"',
+    [StringComparison]::Ordinal
+)
+$projectReadyIndex = $workerSmokeText.IndexOf(
+    'project_json="$(api_get_fresh "$base_url/projects/$project_id/")"',
+    [StringComparison]::Ordinal
+)
+$packagePostIndex = $workerSmokeText.IndexOf(
+    'package_job_json="$(api_auth "$default_api_timeout_seconds"',
+    [StringComparison]::Ordinal
+)
+$packageWaitIndex = $workerSmokeText.IndexOf(
+    'wait_for_job "$package_job_id" "package"',
+    [StringComparison]::Ordinal
+)
+$packageContainerIndex = $workerSmokeText.IndexOf(
+    'verify_removed_worker_container "$package_job_id"',
+    [StringComparison]::Ordinal
+)
+$latestPackageIndex = $workerSmokeText.IndexOf(
+    'latest_package="$(api_get_fresh "$base_url/packages/$project_id/latest/")"',
+    [StringComparison]::Ordinal
+)
+Assert-Contract (
+    $workerSmokeText.Contains('readonly job_discovery_timeout_seconds=120') -and
+    $workerSmokeText.Contains('deadline=$((now + job_discovery_timeout_seconds))') -and
+    $workerSmokeText.Contains('.id == $source_job_id and') -and
+    $workerSmokeText.Contains('.project_id == $project_id and') -and
+    $workerSmokeText.Contains('.type == "create_project" and') -and
+    $workerSmokeText.Contains('.created_by == $source_job.created_by and') -and
+    $workerSmokeText.Contains('.created_at >= $source_job.created_at') -and
+    $workerSmokeText.Contains('if ((matching_count > 1)); then') -and
+    $createWaitIndex -ge 0 -and
+    $createContainerIndex -gt $createWaitIndex -and
+    $processDiscoveryIndex -gt $createContainerIndex -and
+    $processWaitIndex -gt $processDiscoveryIndex -and
+    $processContainerIndex -gt $processWaitIndex -and
+    $projectReadyIndex -gt $processContainerIndex -and
+    $packagePostIndex -gt $projectReadyIndex -and
+    $packageWaitIndex -gt $packagePostIndex -and
+    $packageContainerIndex -gt $packageWaitIndex -and
+    $latestPackageIndex -gt $packageContainerIndex
+) 'The seed-project smoke test can inspect readiness before its process-projectfile worker finishes.'
+Assert-Contract (
+    $workerSmokeText.Contains('jq -e --arg package_job_id "$package_job_id"') -and
+    $workerSmokeText.Contains('((.package_id | type) == "string")') -and
+    $workerSmokeText.Contains('.package_id == $package_job_id')
+) 'The worker smoke test can accept a latest package produced by a different job.'
 Assert-Contract (
     $backupText.Contains('install -o root -g root -m 0700 -d "$backup_root"') -and
     $backupText.Contains('stat -c ''%u:%g:%a'' "$backup_root"') -and

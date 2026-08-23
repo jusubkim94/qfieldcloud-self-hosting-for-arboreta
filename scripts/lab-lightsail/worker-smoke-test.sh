@@ -25,6 +25,7 @@ readonly default_api_timeout_seconds=60
 readonly job_poll_request_cap_seconds=20
 readonly job_poll_seconds=10
 readonly job_wait_timeout_seconds=1200
+readonly job_discovery_timeout_seconds=120
 
 for required_file in "$versions_file" "$runtime_env" "$compose_file" "$secrets_file" \
   "$public_host_file" "$certificate_file" "$installer_revision_file"; do
@@ -72,22 +73,110 @@ compose() {
     "$@"
 }
 
-maintenance_lock_file="/var/lock/qfieldcloud-maintenance.lock"
+readonly qfc_lock_parent="/var/lib/qfieldcloud"
+readonly qfc_lock_root="$qfc_lock_parent/locks"
+prepare_lock_directory() {
+  local lock_path=""
+  local path_metadata=""
+  local trusted_ancestor=""
+
+  for trusted_ancestor in / /var /var/lib; do
+    [[ -d $trusted_ancestor && ! -L $trusted_ancestor ]] || return 1
+    [[ $(realpath -e "$trusted_ancestor") == "$trusted_ancestor" ]] || return 1
+    path_metadata="$(stat -c '%u:%g:%a' "$trusted_ancestor")" || return 1
+    [[ $path_metadata =~ ^0:0:[1357][0145][0145]$ ]] || return 1
+  done
+
+  for lock_path in "$qfc_lock_parent" "$qfc_lock_root"; do
+    if [[ -e $lock_path || -L $lock_path ]]; then
+      [[ -d $lock_path && ! -L $lock_path ]] || return 1
+    else
+      install -o root -g root -m 0700 -d -- "$lock_path" || return 1
+    fi
+    [[ $(realpath -e "$lock_path") == "$lock_path" ]] || return 1
+    [[ $(stat -c '%u:%g:%a' "$lock_path") == "0:0:700" ]] || return 1
+  done
+}
+prepare_lock_file() {
+  local lock_file="$1"
+  local lock_tmp=""
+
+  [[ $lock_file == "$qfc_lock_root/"* ]] || return 1
+  if [[ -e $lock_file || -L $lock_file ]]; then
+    [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  else
+    lock_tmp="$(mktemp "$qfc_lock_root/.lock.XXXXXX")" || return 1
+    if ! chmod 0600 "$lock_tmp" \
+      || [[ $(stat -c '%u:%g:%a' "$lock_tmp") != "0:0:600" ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    if ! ln -T -- "$lock_tmp" "$lock_file" 2>/dev/null \
+      && [[ ! -e $lock_file && ! -L $lock_file ]]; then
+      rm -f -- "$lock_tmp"
+      return 1
+    fi
+    rm -f -- "$lock_tmp" || return 1
+  fi
+  [[ -f $lock_file && ! -L $lock_file ]] || return 1
+  [[ $(realpath -e "$lock_file") == "$lock_file" ]] || return 1
+  [[ $(stat -c '%u:%g:%a' "$lock_file") == "0:0:600" ]] || return 1
+}
+lock_fd_matches_file() {
+  local lock_fd="$1"
+  local lock_file="$2"
+  local fd_identity=""
+  local file_identity=""
+
+  [[ $lock_fd =~ ^[0-9]+$ && -e /proc/$$/fd/$lock_fd ]] || return 1
+  fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$lock_fd")" || return 1
+  file_identity="$(stat -c '%d:%i' "$lock_file")" || return 1
+  [[ $fd_identity == "$file_identity" ]]
+}
+
+for required_lock_command in chmod flock install ln mktemp realpath rm stat; do
+  command -v "$required_lock_command" >/dev/null 2>&1 || {
+    echo "Required lock command is unavailable: $required_lock_command" >&2
+    exit 1
+  }
+done
+prepare_lock_directory || {
+  echo "The root-owned QFieldCloud lock directory is missing or unsafe." >&2
+  exit 1
+}
+maintenance_lock_file="$qfc_lock_root/maintenance.lock"
+worker_smoke_lock_file="$qfc_lock_root/worker-smoke.lock"
+prepare_lock_file "$maintenance_lock_file" || {
+  echo "The QFieldCloud maintenance lock file is missing or unsafe." >&2
+  exit 1
+}
+prepare_lock_file "$worker_smoke_lock_file" || {
+  echo "The QFieldCloud worker-smoke lock file is missing or unsafe." >&2
+  exit 1
+}
 inherited_lock="false"
 if [[ ${QFC_MAINTENANCE_LOCK_FD:-} == "8" ]] && [[ -e /proc/$$/fd/8 ]] && \
-  [[ $(readlink -f /proc/$$/fd/8) == "$(readlink -f "$maintenance_lock_file")" ]]; then
+  lock_fd_matches_file 8 "$maintenance_lock_file"; then
   inherited_lock="true"
 fi
 if [[ $inherited_lock != "true" ]]; then
-  exec 8>"$maintenance_lock_file"
-  if ! flock -n 8; then
-    echo "Another QFieldCloud maintenance operation is already running." >&2
+  exec 8>>"$maintenance_lock_file"
+  lock_fd_matches_file 8 "$maintenance_lock_file" || {
+    echo "The QFieldCloud maintenance lock descriptor changed unexpectedly." >&2
     exit 1
-  fi
-  export QFC_MAINTENANCE_LOCK_FD=8
+  }
 fi
+if ! flock -n 8; then
+  echo "Another QFieldCloud maintenance operation is already running." >&2
+  exit 1
+fi
+export QFC_MAINTENANCE_LOCK_FD=8
 
-exec 9>/var/lock/qfieldcloud-worker-smoke.lock
+exec 9>>"$worker_smoke_lock_file"
+if ! lock_fd_matches_file 9 "$worker_smoke_lock_file"; then
+  echo "The QFieldCloud worker-smoke lock descriptor changed unexpectedly." >&2
+  exit 1
+fi
 if ! flock -n 9; then
   echo "Another worker smoke test is already running." >&2
   exit 1
@@ -108,11 +197,13 @@ smoke_completed="false"
 smoke_started_at="$(date -u +%FT%TZ)"
 project_id=""
 create_job_id=""
+process_job_id=""
 package_job_id=""
 verified_qgis_version=""
 attempt_nonce=""
 ownership_description=""
 ownership_ready="false"
+worker_smoke_deadline=0
 
 write_smoke_status() {
   local status="$1"
@@ -627,6 +718,12 @@ fi
 printf 'header = "Authorization: Token %s"\n' "$auth_token" >"$auth_config"
 chmod 0600 "$auth_config"
 
+if ! worker_smoke_started_monotonic="$(monotonic_seconds)"; then
+  echo "A monotonic clock is unavailable for the shared worker-smoke deadline." >&2
+  exit 1
+fi
+worker_smoke_deadline=$((worker_smoke_started_monotonic + job_wait_timeout_seconds))
+
 projects_json="$(api_get_fresh "$base_url/projects/?search=$smoke_project_name&limit=100")"
 matching_projects="$(jq -c \
   --arg name "$smoke_project_name" \
@@ -683,18 +780,6 @@ if [[ $project_count == "0" ]]; then
     exit 1
   }
 
-  for _ in $(seq 1 30); do
-    jobs_json="$(api_get_fresh "$base_url/jobs/?project_id=$project_id")"
-    create_job_id="$(jq -r \
-      '[.[] | select(.type == "create_project")] | sort_by(.created_at) | last | .id // empty' \
-      <<<"$jobs_json")"
-    [[ -n $create_job_id ]] && break
-    sleep 2
-  done
-  if [[ ! $create_job_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-    echo "The seed project did not create a worker job." >&2
-    exit 1
-  fi
 else
   if [[ $project_count != "1" ]]; then
     echo "More than one exact worker smoke project was returned; refusing to guess." >&2
@@ -716,10 +801,53 @@ if ! is_uuid "$project_id"; then
   exit 1
 fi
 
+while :; do
+  if ! discovery_now="$(monotonic_seconds)"; then
+    echo "The monotonic clock failed during create-project job discovery." >&2
+    exit 1
+  fi
+  discovery_remaining=$((worker_smoke_deadline - discovery_now))
+  ((discovery_remaining > 0)) || break
+  discovery_request_timeout=$job_poll_request_cap_seconds
+  if ((discovery_remaining < discovery_request_timeout)); then
+    discovery_request_timeout=$discovery_remaining
+  fi
+  jobs_json="$(api_get_fresh \
+    "$base_url/jobs/?project_id=$project_id" "$discovery_request_timeout")"
+  matching_create_jobs="$(jq -c --arg project_id "$project_id" '
+    [.[] | select(.project_id == $project_id and .type == "create_project")]
+  ' <<<"$jobs_json")"
+  create_job_count="$(jq -r 'length' <<<"$matching_create_jobs")"
+  if [[ ! $create_job_count =~ ^[0-9]+$ ]] || ((create_job_count > 1)); then
+    echo "The seed project did not return exactly one create-project worker job." >&2
+    exit 1
+  fi
+  if ((create_job_count == 1)); then
+    create_job_id="$(jq -er '.[0].id | select(type == "string")' \
+      <<<"$matching_create_jobs")"
+    break
+  fi
+  if ! discovery_now="$(monotonic_seconds)"; then
+    echo "The monotonic clock failed during create-project job discovery." >&2
+    exit 1
+  fi
+  discovery_remaining=$((worker_smoke_deadline - discovery_now))
+  ((discovery_remaining > 0)) || break
+  discovery_sleep_seconds=$job_poll_seconds
+  if ((discovery_remaining < discovery_sleep_seconds)); then
+    discovery_sleep_seconds=$discovery_remaining
+  fi
+  sleep "$discovery_sleep_seconds"
+done
+if ! is_uuid "$create_job_id"; then
+  echo "The seed project did not create one valid worker job before the shared deadline." >&2
+  exit 1
+fi
+
 wait_for_job() {
   local job_id="$1"
   local job_label="$2"
-  local deadline=0
+  local deadline="$3"
   local job_json=""
   local job_status=""
   local now=0
@@ -727,11 +855,14 @@ wait_for_job() {
   local request_timeout=0
   local sleep_seconds=0
 
+  if [[ ! $deadline =~ ^[0-9]+$ ]] || ! is_uuid "$job_id"; then
+    echo "The $job_label worker deadline input is invalid." >&2
+    return 1
+  fi
   if ! now="$(monotonic_seconds)"; then
     echo "A monotonic clock is unavailable for the $job_label worker deadline." >&2
     return 1
   fi
-  deadline=$((now + job_wait_timeout_seconds))
   while :; do
     if ! now="$(monotonic_seconds)"; then
       echo "The monotonic clock failed during the $job_label worker wait." >&2
@@ -772,7 +903,113 @@ wait_for_job() {
         ;;
     esac
   done
-  echo "$job_label worker job did not finish within 20 minutes." >&2
+  echo "$job_label worker job did not finish before the shared 20-minute worker-smoke deadline." >&2
+  return 1
+}
+
+wait_for_single_project_job_type() {
+  local target_project_id="$1"
+  local source_job_id="$2"
+  local job_type="$3"
+  local job_label="$4"
+  local shared_deadline="$5"
+  local deadline=0
+  local jobs_json=""
+  local matching_jobs=""
+  local matching_count=0
+  local matching_job_id=""
+  local now=0
+  local remaining=0
+  local request_timeout=0
+  local sleep_seconds=0
+
+  if ! is_uuid "$target_project_id" || ! is_uuid "$source_job_id" \
+    || [[ ! $job_type =~ ^[a-z_]+$ ]] \
+    || [[ ! $shared_deadline =~ ^[0-9]+$ ]]; then
+    echo "The $job_label worker discovery input is invalid." >&2
+    return 1
+  fi
+  if ! now="$(monotonic_seconds)"; then
+    echo "A monotonic clock is unavailable for the $job_label discovery deadline." >&2
+    return 1
+  fi
+  deadline=$((now + job_discovery_timeout_seconds))
+  if ((shared_deadline < deadline)); then
+    deadline=$shared_deadline
+  fi
+  while :; do
+    if ! now="$(monotonic_seconds)"; then
+      echo "The monotonic clock failed during $job_label discovery." >&2
+      return 1
+    fi
+    remaining=$((deadline - now))
+    ((remaining > 0)) || break
+    request_timeout=$job_poll_request_cap_seconds
+    if ((remaining < request_timeout)); then
+      request_timeout=$remaining
+    fi
+    if ! jobs_json="$(api_get_fresh \
+      "$base_url/jobs/?project_id=$target_project_id" "$request_timeout")"; then
+      echo "The jobs API failed during $job_label discovery." >&2
+      return 1
+    fi
+    if ! matching_jobs="$(jq -c \
+      --arg project_id "$target_project_id" \
+      --arg source_job_id "$source_job_id" \
+      --arg type "$job_type" '
+        [.[] | select(
+          .id == $source_job_id and
+          .project_id == $project_id and
+          .type == "create_project" and
+          ((.created_at | type) == "string")
+        )] as $source_jobs |
+        if ($source_jobs | length) != 1 then
+          error("source worker job metadata is not unique")
+        else
+          $source_jobs[0] as $source_job |
+          [.[] | select(
+            .project_id == $project_id and
+            .type == $type and
+            .created_by == $source_job.created_by and
+            ((.created_at | type) == "string") and
+            .created_at >= $source_job.created_at
+          )]
+        end
+      ' <<<"$jobs_json")"; then
+      echo "The jobs API returned invalid JSON during $job_label discovery." >&2
+      return 1
+    fi
+    matching_count="$(jq -r 'length' <<<"$matching_jobs")"
+    if [[ ! $matching_count =~ ^[0-9]+$ ]]; then
+      echo "The jobs API returned an invalid $job_label count." >&2
+      return 1
+    fi
+    if ((matching_count > 1)); then
+      echo "More than one $job_label worker job exists for the exact smoke project." >&2
+      return 1
+    fi
+    if ((matching_count == 1)); then
+      matching_job_id="$(jq -er '.[0].id | select(type == "string")' <<<"$matching_jobs")"
+      if ! is_uuid "$matching_job_id"; then
+        echo "The discovered $job_label worker job identifier is invalid." >&2
+        return 1
+      fi
+      printf '%s\n' "$matching_job_id"
+      return 0
+    fi
+    if ! now="$(monotonic_seconds)"; then
+      echo "The monotonic clock failed during $job_label discovery." >&2
+      return 1
+    fi
+    remaining=$((deadline - now))
+    ((remaining > 0)) || break
+    sleep_seconds=$job_poll_seconds
+    if ((remaining < sleep_seconds)); then
+      sleep_seconds=$remaining
+    fi
+    sleep "$sleep_seconds"
+  done
+  echo "The $job_label worker job was not discovered before its bounded discovery deadline." >&2
   return 1
 }
 
@@ -828,9 +1065,18 @@ print("QFC_SMOKE_METADATA=" + json.dumps({
 }
 
 if [[ -n $create_job_id ]]; then
-  wait_for_job "$create_job_id" "create-project"
+  wait_for_job "$create_job_id" "create-project" "$worker_smoke_deadline"
   verify_removed_worker_container "$create_job_id"
 fi
+
+if ! process_job_id="$(wait_for_single_project_job_type \
+  "$project_id" "$create_job_id" "process_projectfile" "process-projectfile" \
+  "$worker_smoke_deadline")"; then
+  echo "The seed project did not produce one process-projectfile worker job." >&2
+  exit 1
+fi
+wait_for_job "$process_job_id" "process-projectfile" "$worker_smoke_deadline"
+verify_removed_worker_container "$process_job_id"
 
 project_json="$(api_get_fresh "$base_url/projects/$project_id/")"
 if ! jq -e '
@@ -857,13 +1103,15 @@ if ! is_uuid "$package_job_id"; then
   exit 1
 fi
 
-wait_for_job "$package_job_id" "package"
+wait_for_job "$package_job_id" "package" "$worker_smoke_deadline"
 verify_removed_worker_container "$package_job_id"
 
 latest_package="$(api_get_fresh "$base_url/packages/$project_id/latest/")"
-if ! jq -e '
+if ! jq -e --arg package_job_id "$package_job_id" '
   type == "object" and
   .status == "finished" and
+  ((.package_id | type) == "string") and
+  .package_id == $package_job_id and
   ((.files | type) == "array") and
   ((.files | length) > 0)
 ' >/dev/null <<<"$latest_package"; then
