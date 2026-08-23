@@ -410,7 +410,7 @@ Assert-Contract (
     $restoreTestText.Contains('createdb --template template0 --username "$operational_db_user"') -and
     $restoreTestText.Contains('dropdb --if-exists --force --username "$operational_db_user"') -and
     $restoreTestText.Contains('A previous restore test left a namespaced temporary database behind; inspect it before retrying.') -and
-    $restoreTestText.Contains('SELECT count(*) FROM pg_database WHERE datname = :''restore_database'';') -and
+    $restoreTestText.Contains('SELECT count(*) FROM pg_database WHERE datname = ''$temporary_database'';') -and
     $restoreTestText.Contains('[[ $database_count == "0" ]]') -and
     $restoreTestText.Contains('docker network connect --alias db "$network_name" "$operational_db_container"') -and
     $restoreTestText.Contains('disconnect_operational_database_network || cleanup_failed=1') -and

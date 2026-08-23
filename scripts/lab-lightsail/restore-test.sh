@@ -724,8 +724,7 @@ drop_owned_temporary_database() {
     operational_compose exec --no-TTY db \
       psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
         --username "$operational_db_user" --dbname postgres \
-        --set "restore_database=$temporary_database" \
-        --command "SELECT count(*) FROM pg_database WHERE datname = :'restore_database';" \
+        --command "SELECT count(*) FROM pg_database WHERE datname = '$temporary_database';" \
       2>/dev/null | tr -d '\r'
   )" || return 1
   [[ $database_count == "0" ]] || return 1
