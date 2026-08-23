@@ -21,6 +21,7 @@ repository_url=""
 revision=""
 install_root="$DEFAULT_INSTALL_ROOT"
 public_host="auto"
+certificate_mode="self-signed"
 
 usage() {
   cat <<'EOF'
@@ -33,7 +34,8 @@ Required:
 
 Options:
   --install-root PATH    Installation directory (default: /opt/qfieldcloud)
-  --public-host HOST     Existing DNS name, or "auto" for IP.sslip.io
+  --public-host HOST     Existing DNS name, or "auto" for the selected TLS mode
+  --certificate-mode M  "self-signed" or "letsencrypt-ip" (default: self-signed)
   --help                 Show this help
 EOF
 }
@@ -54,6 +56,10 @@ while (($# > 0)); do
       ;;
     --public-host)
       public_host="${2:-}"
+      shift 2
+      ;;
+    --certificate-mode)
+      certificate_mode="${2:-}"
       shift 2
       ;;
     --help)
@@ -93,6 +99,14 @@ fi
 
 if [[ $public_host != "auto" ]] && [[ ! $public_host =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   echo "--public-host contains unsupported characters." >&2
+  exit 2
+fi
+if [[ $certificate_mode != "self-signed" && $certificate_mode != "letsencrypt-ip" ]]; then
+  echo "--certificate-mode must be self-signed or letsencrypt-ip." >&2
+  exit 2
+fi
+if [[ $certificate_mode == "letsencrypt-ip" && $public_host != "auto" ]]; then
+  echo "letsencrypt-ip mode requires --public-host auto so the attached static IPv4 is used." >&2
   exit 2
 fi
 if ! command -v timeout >/dev/null 2>&1; then
@@ -317,7 +331,7 @@ git -C "$installer_root" checkout --quiet --detach --force "$revision"
 
 readonly version_source="$installer_root/config/qfieldcloud-v26.25.env"
 readonly compose_source="$installer_root/runtime/lab-lightsail/compose.yaml"
-helper_names=(health-check.sh show-admin-credentials.sh backup.sh restore-test.sh worker-smoke-test.sh)
+helper_names=(health-check.sh show-admin-credentials.sh backup.sh restore-test.sh worker-smoke-test.sh certificate-renew.sh)
 for required_file in "$version_source" "$compose_source"; do
   if [[ ! -f $required_file ]]; then
     echo "Required installer file is missing: $required_file" >&2
@@ -344,7 +358,8 @@ required_version_variables=(
   QFIELDCLOUD_RELEASE QFIELDCLOUD_COMMIT QFIELDCLOUD_PLATFORM
   QFIELDCLOUD_DHPARAM_SHA256 QFC_APP_IMAGE QFC_NGINX_IMAGE
   QFC_WORKER_WRAPPER_IMAGE QFC_QGIS3_IMAGE QFC_QGIS3_EXPECTED_VERSION
-  QFC_CREATEBUCKETS_IMAGE
+  QFC_CREATEBUCKETS_IMAGE CERTBOT_IMAGE CERTBOT_EXPECTED_VERSION
+  LETSENCRYPT_ACME_DIRECTORY LETSENCRYPT_CERTIFICATE_PROFILE
   POSTGIS_IMAGE RUSTFS_IMAGE SMTP4DEV_IMAGE OFELIA_IMAGE MEMCACHED_IMAGE
   PROJ_DATA_RELEASE PROJ_DATA_ARCHIVE_URL PROJ_DATA_ARCHIVE_SIZE_BYTES
   PROJ_DATA_ARCHIVE_SHA256
@@ -364,7 +379,7 @@ if [[ $QFIELDCLOUD_PLATFORM != "linux/amd64" ]]; then
   exit 1
 fi
 
-for image_variable in QFC_APP_IMAGE QFC_NGINX_IMAGE QFC_WORKER_WRAPPER_IMAGE QFC_QGIS3_IMAGE QFC_CREATEBUCKETS_IMAGE POSTGIS_IMAGE RUSTFS_IMAGE SMTP4DEV_IMAGE OFELIA_IMAGE MEMCACHED_IMAGE; do
+for image_variable in QFC_APP_IMAGE QFC_NGINX_IMAGE QFC_WORKER_WRAPPER_IMAGE QFC_QGIS3_IMAGE QFC_CREATEBUCKETS_IMAGE CERTBOT_IMAGE POSTGIS_IMAGE RUSTFS_IMAGE SMTP4DEV_IMAGE OFELIA_IMAGE MEMCACHED_IMAGE; do
   if [[ ! ${!image_variable} =~ @sha256:[0-9a-f]{64}$ ]]; then
     echo "$image_variable is not pinned to a sha256 manifest." >&2
     exit 1
@@ -373,6 +388,12 @@ done
 
 if [[ ${QFC_QGIS4_IMAGE:-} != disabled.invalid/* ]]; then
   echo "QGIS 4 must remain fail-closed until an official verified image exists." >&2
+  exit 1
+fi
+if [[ ! $CERTBOT_EXPECTED_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+  [[ $LETSENCRYPT_ACME_DIRECTORY != "https://acme-v02.api.letsencrypt.org/directory" ]] || \
+  [[ $LETSENCRYPT_CERTIFICATE_PROFILE != "shortlived" ]]; then
+  echo "The pinned public certificate automation metadata is invalid." >&2
   exit 1
 fi
 
@@ -397,7 +418,8 @@ source_manifest_listing="$(
     scripts/lab-lightsail/show-admin-credentials.sh \
     scripts/lab-lightsail/backup.sh \
     scripts/lab-lightsail/restore-test.sh \
-    scripts/lab-lightsail/worker-smoke-test.sh
+    scripts/lab-lightsail/worker-smoke-test.sh \
+    scripts/lab-lightsail/certificate-renew.sh
 )"
 source_manifest_sha256="$(printf '%s\n' "$source_manifest_listing" | sha256sum | awk '{print $1}')"
 if [[ ! $source_manifest_sha256 =~ ^[0-9a-f]{64}$ ]]; then
@@ -612,7 +634,11 @@ auto_public_host="false"
 if [[ $public_host == "auto" ]]; then
   auto_public_host="true"
   public_ipv4="$(discover_public_ipv4)"
-  public_host="${public_ipv4}.sslip.io"
+  if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+    public_host="$public_ipv4"
+  else
+    public_host="${public_ipv4}.sslip.io"
+  fi
 fi
 
 if [[ ! $public_host =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
@@ -622,32 +648,96 @@ fi
 
 readonly state_root="$install_root/state"
 readonly cert_root="$state_root/certs"
+readonly cert_release_root="$cert_root/releases"
 readonly dhparam_root="$state_root/dhparams"
 readonly ca_root="$state_root/ca"
 readonly nginx_config_root="$state_root/nginx-config"
 readonly temp_root="$state_root/tmp"
-install -m 0700 -d "$state_root" "$cert_root" "$dhparam_root" "$ca_root" "$nginx_config_root" "$temp_root"
+readonly certbot_root="$state_root/certbot"
+readonly certbot_work_root="$state_root/certbot-work"
+readonly certbot_log_root="$state_root/certbot-log"
+install -m 0700 -d "$state_root" "$cert_root" "$cert_release_root" \
+  "$dhparam_root" "$ca_root" "$nginx_config_root" "$temp_root" \
+  "$certbot_root" "$certbot_work_root" "$certbot_log_root"
 
 readonly host_state_file="$state_root/public-host"
+readonly certificate_mode_file="$state_root/certificate-mode"
 configure_public_host_files() {
   local previous_host=""
+  local previous_mode=""
+  local current_target=""
+  local current_real=""
+  local selector_reusable="false"
+  local candidate_dir=""
+  local candidate_fingerprint=""
+  local final_release=""
+  local next_link=""
+  local san_kind="DNS"
+  local state_tmp=""
 
-  if [[ -f $host_state_file ]]; then
+  if [[ -f $host_state_file && ! -L $host_state_file ]]; then
     previous_host="$(<"$host_state_file")"
   fi
-  if [[ $previous_host != "$public_host" ]] || \
-    [[ ! -s $cert_root/qfieldcloud.pem ]] || [[ ! -s $cert_root/qfieldcloud-key.pem ]]; then
-    openssl req -x509 -nodes -newkey rsa:3072 -sha256 -days 365 \
-      -keyout "$cert_root/qfieldcloud-key.pem.new" \
-      -out "$cert_root/qfieldcloud.pem.new" \
-      -subj "/CN=$public_host" \
-      -addext "subjectAltName=DNS:$public_host"
-    chmod 0600 "$cert_root/qfieldcloud-key.pem.new" "$cert_root/qfieldcloud.pem.new"
-    mv -f "$cert_root/qfieldcloud-key.pem.new" "$cert_root/qfieldcloud-key.pem"
-    mv -f "$cert_root/qfieldcloud.pem.new" "$cert_root/qfieldcloud.pem"
+  if [[ -f $certificate_mode_file && ! -L $certificate_mode_file ]]; then
+    previous_mode="$(<"$certificate_mode_file")"
   fi
-  printf '%s\n' "$public_host" >"$host_state_file"
-  chmod 0600 "$host_state_file"
+  if [[ -L $cert_root/current ]]; then
+    current_target="$(readlink "$cert_root/current")"
+    current_real="$(realpath -e "$cert_root/current" 2>/dev/null || true)"
+    if [[ $current_target =~ ^releases/[A-Za-z0-9._-]+$ ]] && \
+      [[ $current_real == "$cert_release_root/"* ]] && \
+      [[ -f $cert_root/current/fullchain.pem && ! -L $cert_root/current/fullchain.pem ]] && \
+      [[ -f $cert_root/current/privkey.pem && ! -L $cert_root/current/privkey.pem ]] && \
+      [[ $previous_host == "$public_host" ]] && [[ $previous_mode == "$certificate_mode" ]]; then
+      selector_reusable="true"
+    fi
+  elif [[ -e $cert_root/current ]]; then
+    echo "The current certificate selector is unsafe." >&2
+    exit 1
+  fi
+
+  if [[ $selector_reusable != "true" ]]; then
+    if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+      san_kind="IP"
+    fi
+    candidate_dir="$(mktemp -d "$cert_release_root/.candidate.XXXXXX")"
+    chmod 0700 "$candidate_dir"
+    openssl req -x509 -nodes -newkey rsa:3072 -sha256 -days 365 \
+      -keyout "$candidate_dir/privkey.pem" \
+      -out "$candidate_dir/fullchain.pem" \
+      -subj "/CN=$public_host" \
+      -addext "subjectAltName=$san_kind:$public_host"
+    chmod 0600 "$candidate_dir/privkey.pem" "$candidate_dir/fullchain.pem"
+    candidate_fingerprint="$(openssl x509 -in "$candidate_dir/fullchain.pem" -outform DER \
+      | sha256sum | awk '{print $1}')"
+    if [[ ! $candidate_fingerprint =~ ^[0-9a-f]{64}$ ]]; then
+      rm -rf -- "$candidate_dir"
+      echo "The temporary certificate fingerprint is invalid." >&2
+      exit 1
+    fi
+    final_release="$cert_release_root/bootstrap-$candidate_fingerprint"
+    if [[ -e $final_release || -L $final_release ]]; then
+      rm -rf -- "$candidate_dir"
+      if [[ ! -d $final_release || -L $final_release ]]; then
+        echo "The temporary certificate release target is unsafe." >&2
+        exit 1
+      fi
+    else
+      mv -- "$candidate_dir" "$final_release"
+    fi
+    next_link="$cert_root/.current.$$"
+    ln -s -- "releases/bootstrap-$candidate_fingerprint" "$next_link"
+    mv -Tf -- "$next_link" "$cert_root/current"
+  fi
+
+  state_tmp="$(mktemp "$state_root/.public-host.XXXXXX")"
+  printf '%s\n' "$public_host" >"$state_tmp"
+  chmod 0600 "$state_tmp"
+  mv -f -- "$state_tmp" "$host_state_file"
+  state_tmp="$(mktemp "$state_root/.certificate-mode.XXXXXX")"
+  printf '%s\n' "$certificate_mode" >"$state_tmp"
+  chmod 0600 "$state_tmp"
+  mv -f -- "$state_tmp" "$certificate_mode_file"
 }
 
 configure_public_host_files
@@ -902,7 +992,11 @@ reconcile_auto_public_host() {
     return 0
   fi
   current_public_ipv4="$(discover_public_ipv4)"
-  current_public_host="${current_public_ipv4}.sslip.io"
+  if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+    current_public_host="$current_public_ipv4"
+  else
+    current_public_host="${current_public_ipv4}.sslip.io"
+  fi
   if [[ $current_public_host != "$public_host" ]]; then
     public_host="$current_public_host"
     configure_public_host_files
@@ -914,6 +1008,9 @@ reconcile_auto_public_host() {
 
 compose config --quiet
 compose pull db rustfs createbuckets smtp4dev memcached app nginx worker_wrapper ofelia
+if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  compose pull certbot
+fi
 docker pull "$QFC_QGIS3_IMAGE"
 
 compose up -d db rustfs smtp4dev memcached
@@ -927,17 +1024,6 @@ printf '%s\n' "$PROJ_DATA_RELEASE" >"$state_root/proj-data-release"
 printf '%s\n' "$QFC_QGIS3_EXPECTED_VERSION" >"$state_root/qgis3-verified-version"
 chmod 0600 "$state_root/proj-data-release" "$state_root/qgis3-verified-version"
 reconcile_auto_public_host
-
-certificate_sha256="$(openssl x509 -in "$cert_root/qfieldcloud.pem" -outform DER \
-  | sha256sum | awk '{print $1}')"
-if [[ ! $certificate_sha256 =~ ^[0-9a-f]{64}$ ]]; then
-  echo "The pilot certificate SHA-256 fingerprint could not be calculated." >&2
-  exit 1
-fi
-# Backup recovery and every later health gate validate this stored fingerprint
-# against the live certificate. Publish it atomically only after the final
-# static-IP hostname reconciliation has completed.
-write_root_state_value certificate-sha256 "$certificate_sha256"
 
 check_admin_account() {
   compose run --rm --no-TTY \
@@ -994,14 +1080,19 @@ unset ADMIN_PASSWORD
 
 compose up -d app nginx
 
+if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  bootstrap_https_route=(--connect-to "$public_host:443:127.0.0.1:443")
+else
+  bootstrap_https_route=(--resolve "$public_host:443:127.0.0.1")
+fi
 health_ok="false"
 for _ in $(seq 1 36); do
   # QFieldCloud v26.25 caches this view for 60 seconds. Force each readiness
   # attempt to observe the current database and object-storage connections.
   status_nonce="$(date -u +%s%N)-$$-${RANDOM}"
   status_json="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
-    --cacert "$cert_root/qfieldcloud.pem" \
-    --resolve "$public_host:443:127.0.0.1" \
+    --cacert "$cert_root/current/fullchain.pem" \
+    "${bootstrap_https_route[@]}" \
     "https://$public_host/api/v1/status/?bootstrap_nonce=$status_nonce" || true)"
   if jq -e '.database == "ok" and .storage == "ok"' >/dev/null 2>&1 <<<"$status_json"; then
     health_ok="true"
@@ -1013,6 +1104,72 @@ if [[ $health_ok != "true" ]]; then
   echo "QFieldCloud health endpoint did not report database=ok and storage=ok." >&2
   exit 1
 fi
+
+install_certificate_timer() {
+  local service_tmp=""
+  local timer_tmp=""
+
+  service_tmp="$(mktemp /etc/systemd/system/qfieldcloud-certificate-renew.service.XXXXXX)"
+  timer_tmp="$(mktemp /etc/systemd/system/qfieldcloud-certificate-renew.timer.XXXXXX)"
+  cat >"$service_tmp" <<EOF
+[Unit]
+Description=Renew and validate the QFieldCloud public IPv4 certificate
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=QFC_INSTALL_ROOT=$install_root
+ExecStart=/usr/bin/timeout --signal=TERM --kill-after=60s 1800s $install_root/bin/certificate-renew.sh
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
+UMask=0077
+EOF
+  cat >"$timer_tmp" <<'EOF'
+[Unit]
+Description=Check the QFieldCloud short-lived certificate every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+RandomizedDelaySec=45m
+Persistent=true
+AccuracySec=5m
+Unit=qfieldcloud-certificate-renew.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  chmod 0644 "$service_tmp" "$timer_tmp"
+  mv -f -- "$service_tmp" /etc/systemd/system/qfieldcloud-certificate-renew.service
+  mv -f -- "$timer_tmp" /etc/systemd/system/qfieldcloud-certificate-renew.timer
+  systemctl daemon-reload
+  systemctl enable --now qfieldcloud-certificate-renew.timer >/dev/null
+  if ! systemctl is-enabled --quiet qfieldcloud-certificate-renew.timer || \
+    ! systemctl is-active --quiet qfieldcloud-certificate-renew.timer; then
+    echo "The public certificate renewal timer did not become active." >&2
+    exit 1
+  fi
+}
+
+if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  if ! "$install_root/bin/certificate-renew.sh" --initial; then
+    echo "The public IPv4 certificate was not issued and validated; bootstrap will not report success." >&2
+    exit 1
+  fi
+  install_certificate_timer
+fi
+
+certificate_sha256="$(openssl x509 -in "$cert_root/current/fullchain.pem" -outform DER \
+  | sha256sum | awk '{print $1}')"
+if [[ ! $certificate_sha256 =~ ^[0-9a-f]{64}$ ]]; then
+  echo "The pilot certificate SHA-256 fingerprint could not be calculated." >&2
+  exit 1
+fi
+# The wait condition uses this fingerprint only as evidence of the certificate
+# served at initial completion. Public certificates rotate during renewal.
+write_root_state_value certificate-sha256 "$certificate_sha256"
 
 compose up -d worker_wrapper ofelia
 sleep 15
@@ -1031,7 +1188,12 @@ write_bootstrap_state services-ready
 
 if [[ $auto_public_host == "true" ]]; then
   final_public_ipv4="$(discover_public_ipv4)"
-  if [[ "${final_public_ipv4}.sslip.io" != "$public_host" ]]; then
+  if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+    expected_final_public_host="$final_public_ipv4"
+  else
+    expected_final_public_host="${final_public_ipv4}.sslip.io"
+  fi
+  if [[ $expected_final_public_host != "$public_host" ]]; then
     echo "The public address changed after services started; rerun the same pinned bootstrap before using the pilot." >&2
     exit 1
   fi
@@ -1110,5 +1272,9 @@ bootstrap_succeeded="true"
 
 echo "[$(date -u +%FT%TZ)] QFieldCloud $QFIELDCLOUD_RELEASE bootstrap completed."
 echo "Public pilot URL: https://$public_host/"
-echo "The certificate is self-signed; review the lab documentation before accepting it."
+if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  echo "The public IPv4 certificate is scheduled for automatic six-hour renewal checks."
+else
+  echo "The certificate is self-signed; review the lab documentation before accepting it."
+fi
 echo "Administrator credentials remain in a root-only file on the instance and were not printed."

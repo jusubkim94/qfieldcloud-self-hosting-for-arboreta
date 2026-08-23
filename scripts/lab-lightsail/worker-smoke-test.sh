@@ -15,7 +15,8 @@ runtime_env="$install_root/state/runtime.env"
 compose_file="$install_root/compose.yaml"
 secrets_file="$install_root/state/secrets.env"
 public_host_file="$install_root/state/public-host"
-certificate_file="$install_root/state/certs/qfieldcloud.pem"
+certificate_mode_file="$install_root/state/certificate-mode"
+certificate_file="$install_root/state/certs/current/fullchain.pem"
 installer_revision_file="$install_root/state/installer-revision"
 smoke_status_file="$install_root/state/worker-smoke-status.json"
 smoke_owner_file="$install_root/state/worker-smoke-owned-project.json"
@@ -28,7 +29,8 @@ readonly job_wait_timeout_seconds=1200
 readonly job_discovery_timeout_seconds=120
 
 for required_file in "$versions_file" "$runtime_env" "$compose_file" "$secrets_file" \
-  "$public_host_file" "$certificate_file" "$installer_revision_file"; do
+  "$public_host_file" "$certificate_mode_file" "$certificate_file" \
+  "$installer_revision_file"; do
   if [[ ! -f $required_file || -L $required_file ]]; then
     echo "Required installation state is missing: $required_file" >&2
     exit 1
@@ -55,8 +57,13 @@ if [[ $admin_username_count -ne 1 ]] || [[ ! $ADMIN_USERNAME =~ ^[A-Za-z0-9_.-]+
   exit 1
 fi
 public_host="$(<"$public_host_file")"
+certificate_mode="$(<"$certificate_mode_file")"
 if [[ ! $public_host =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   echo "The public host state is invalid." >&2
+  exit 1
+fi
+if [[ $certificate_mode != "self-signed" && $certificate_mode != "letsencrypt-ip" ]]; then
+  echo "The certificate mode state is invalid." >&2
   exit 1
 fi
 installer_revision="$(<"$installer_revision_file")"
@@ -244,10 +251,13 @@ curl_common=(
   --silent
   --show-error
   --fail
-  --cacert "$certificate_file"
   --connect-timeout 5
-  --resolve "$public_host:443:127.0.0.1"
 )
+if [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  curl_common+=(--connect-to "$public_host:443:127.0.0.1:443")
+else
+  curl_common+=(--cacert "$certificate_file" --resolve "$public_host:443:127.0.0.1")
+fi
 
 api_auth() {
   local timeout_seconds="$1"

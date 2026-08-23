@@ -53,6 +53,7 @@ jobs:
             'scripts/lab-lightsail/Test-Onboarding.ps1'
             'scripts/lab-lightsail/Test-IamPolicies.ps1'
             'scripts/lab-lightsail/Test-AccessBootstrap.ps1'
+            'scripts/lab-lightsail/Test-CertificateAutomation.ps1'
           )
           foreach ($test in $tests) {
             & pwsh -NoProfile -File $test

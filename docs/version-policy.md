@@ -2,13 +2,14 @@
 
 ## 한눈에 보는 결론
 
-`lab-lightsail` 파일럿의 검증 기준일은 **2026-08-23**입니다. 현재 기준선은 다음과 같습니다.
+`lab-lightsail` 파일럿의 검증 기준일은 **2026-08-24**입니다. 현재 기준선은 다음과 같습니다.
 
 - QFieldCloud 공식 릴리스 `v26.25`
 - 릴리스가 가리키는 전체 commit `c32bc110f8291b2a32e318528ee46689771630d6`
 - 실행 플랫폼 `linux/amd64`
 - QGIS 3 작업만 지원하며 QGIS 4 작업은 안전하게 실패하도록 차단
 - 컨테이너와 PROJ-data는 내용 기반 digest 또는 checksum(다운로드가 바뀌거나 손상되지 않았는지 확인하는 값)으로 고정
+- 선택 `letsencrypt-ip` 모드의 Certbot은 `5.7.0`과 `linux/amd64` manifest digest로 고정
 - 새 버전은 자동 적용하지 않고 검증 Pull Request(변경 검토 요청)와 사용자 승인을 거쳐 적용
 
 태그는 사람이 읽기 쉬운 이름이고 digest는 실제 내용을 가리키는 고정값입니다. 따라서 문서에는 둘을 함께 기록하되, 배포에는 digest를 사용합니다.
@@ -54,8 +55,17 @@ QFieldCloud 이외의 컨테이너도 태그가 아니라 `linux/amd64` manifest
 | smtp4dev | [`rnwood/smtp4dev:v3`](https://hub.docker.com/v2/repositories/rnwood/smtp4dev/tags/v3) | `sha256:a9fc3930b16f26cf8fb3f4e20b2924e96b619c141ed895e02581bcf4f631b8c3` |
 | Ofelia | [`mcuadros/ofelia:0.3.18`](https://hub.docker.com/v2/repositories/mcuadros/ofelia/tags/0.3.18) | `sha256:544718912e78a435ec0cd4c732d4f187ee60f0c45bd0d5dee6117c42aa463b62` |
 | Memcached | [`memcached:1`](https://hub.docker.com/v2/repositories/library/memcached/tags/1) | `sha256:ccb35654049b320579c935b2b1e9f85ee5a44a39f7610f882f94d7f601a6a50b` |
+| Certbot | [`5.7.0` 공식 릴리스](https://github.com/certbot/certbot/releases/tag/v5.7.0) | `sha256:d07bd043d61d6bee1114235ac12c2e9a5c54b6931b3ccf5e1174d6c8c4afaa95` |
 
-digest를 바꾸는 것은 업데이트입니다. 레지스트리에서 새 태그를 발견했다는 이유만으로 실행 중인 서버나 설치 manifest를 자동 변경하지 않습니다. RustFS가 beta이고 smtp4dev가 시험용 메일 도구라는 제품 성격도 버전 검토와 별도로 운영 적합성 검토 대상입니다.
+digest를 바꾸는 것은 업데이트입니다. 레지스트리에서 새 태그를 발견했다는 이유만으로 실행 중인 서버나 설치 manifest를 자동 변경하지 않습니다. RustFS가 beta이고 smtp4dev가 시험용 메일 도구라는 제품 성격도 버전 검토와 별도로 운영 적합성 검토 대상입니다. Certbot 컨테이너는 `letsencrypt-ip` 모드에서 발급·갱신할 때만 실행하며 설치기는 실제 출력이 정확히 `certbot 5.7.0`인지도 확인합니다.
+
+### Let’s Encrypt IP 인증서 기준선
+
+선택 모드는 production ACME directory `https://acme-v02.api.letsencrypt.org/directory`, certificate profile `shortlived`, HTTP-01 challenge와 고정 IPv4를 사용합니다. [Let’s Encrypt 공식 발표](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability.html)에 따르면 IP 주소 인증서는 short-lived profile이어야 하고 유효기간은 **160시간**입니다. [Certbot 공식 사용 안내](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/)에 따라 IP 주소와 webroot를 지원하는 Certbot을 사용합니다.
+
+이 선택은 인증서 파일을 버전처럼 영구 고정한다는 뜻이 아닙니다. 공인 인증서는 6시간마다, 최대 45분 무작위 지연 뒤 갱신을 확인하며 새 인증서마다 serial과 SHA-256 지문이 바뀔 수 있습니다. 설치된 자동화가 고정하는 것은 Certbot 이미지, ACME endpoint, profile, 안전 검증과 전환 절차입니다. 실제 인증서의 신뢰 여부는 운영체제 CA chain, 현재 IPv4 SAN, 인증서·개인키 일치와 48시간 초과 유효 여유로 다시 판단합니다.
+
+Let’s Encrypt의 CA 운영, 이용약관, 발급 정책, rate limit과 인터넷 가용성은 이 저장소가 digest로 고정하거나 통제할 수 없는 외부 계층입니다. 약관은 [Let’s Encrypt 정책 저장소](https://letsencrypt.org/repository/)에서 설치 직전에 다시 확인해야 합니다. 현재 코드는 정적 계약 검사만 거쳤고 AWS 실제 최초 발급·시간 경과 갱신 종단 간 검증 전이므로, 이 기준선을 검증 완료 인증서 서비스라고 표현하지 않습니다.
 
 ## PROJ-data 변환 격자
 
@@ -92,8 +102,8 @@ QGIS worker가 좌표 변환에 사용하는 격자는 [OSGeo PROJ-data `1.24.0`
 2. 릴리스 태그가 가리키는 전체 commit을 확인합니다.
 3. 공식 release workflow와 provenance가 그 commit을 사용했는지 확인합니다.
 4. 각 이미지의 `linux/amd64` digest와 실제 프로그램 버전을 확인합니다.
-5. 외부 이미지와 PROJ-data의 digest·checksum·라이선스 목록을 다시 기록합니다.
-6. 데이터베이스 migration(구조 변경), 상태 endpoint, QGIS 3 worker 작업, 백업과 격리 복원을 비운영 환경에서 시험합니다.
+5. 외부 이미지, Certbot과 PROJ-data의 digest·checksum·라이선스 목록을 다시 기록합니다.
+6. 데이터베이스 migration(구조 변경), 상태 endpoint, QGIS 3 worker 작업, 백업과 격리 복원을 비운영 환경에서 시험합니다. `letsencrypt-ip` 변경이면 staging과 승인된 실제 환경에서 최초 발급·갱신·실패 롤백도 별도로 시험합니다.
 7. QGIS 4는 별도의 실제 버전 확인과 worker 시험 없이는 활성화하지 않습니다.
 8. 변경값, 비용 영향과 롤백 방법을 Pull Request에 기록합니다.
 9. 사용자가 검토하고 명시적으로 승인한 뒤에만 파일럿에 적용합니다.

@@ -10,9 +10,14 @@ param(
     [ValidatePattern('^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$')]
     [string]$HostName,
 
-    [Parameter(ParameterSetName = 'Host', Mandatory = $true)]
-    [ValidatePattern('^[0-9A-Fa-f]{64}$')]
-    [string]$ExpectedCertificateSha256,
+    [Parameter(ParameterSetName = 'Host')]
+    [AllowEmptyString()]
+    [ValidatePattern('^(?:[0-9A-Fa-f]{64})?$')]
+    [string]$ExpectedCertificateSha256 = '',
+
+    [Parameter(ParameterSetName = 'Host')]
+    [ValidateSet('self-signed', 'letsencrypt-ip')]
+    [string]$CertificateMode = 'self-signed',
 
     [ValidateSet('ap-northeast-2')]
     [string]$Region = 'ap-northeast-2',
@@ -558,7 +563,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Stack') {
     }
     foreach ($requiredOutput in @(
         'PilotHostName', 'InstanceName', 'BootstrapRevision', 'BootstrapSha256',
-        'BootstrapValidationData'
+        'BootstrapValidationData', 'CertificateMode'
     )) {
         if (-not $outputs.ContainsKey($requiredOutput)) {
             throw "스택 출력에 $requiredOutput 값이 없습니다."
@@ -566,6 +571,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Stack') {
     }
 
     $HostName = [string]$outputs['PilotHostName']
+    $CertificateMode = [string]$outputs['CertificateMode']
+    if ($CertificateMode -notin @('self-signed', 'letsencrypt-ip')) {
+        throw '스택의 인증서 모드가 지원되는 값이 아닙니다.'
+    }
     $bootstrapRevision = [string]$outputs['BootstrapRevision']
     if ($bootstrapRevision -notmatch '^[0-9a-f]{40}$') {
         throw '스택의 bootstrap revision이 고정된 전체 Git commit 형식이 아닙니다.'
@@ -590,7 +599,13 @@ if ($PSCmdlet.ParameterSetName -eq 'Stack') {
     if ($fingerprintProperties.Count -ne 1) {
         throw 'CloudFormation 검증 자료에 인증서 지문이 하나로 들어 있지 않습니다.'
     }
-    $ExpectedCertificateSha256 = [string]$fingerprintProperties[0].Value
+    $initialCertificateSha256 = [string]$fingerprintProperties[0].Value
+    if ($initialCertificateSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw 'CloudFormation의 최초 인증서 발급 증거가 올바른 SHA-256 형식이 아닙니다.'
+    }
+    if ($CertificateMode -eq 'self-signed') {
+        $ExpectedCertificateSha256 = $initialCertificateSha256
+    }
 
     $stateResult = Invoke-AwsJson -Arguments @(
         'lightsail', 'get-instance-state', '--instance-name', [string]$outputs['InstanceName']
@@ -601,15 +616,25 @@ if ($PSCmdlet.ParameterSetName -eq 'Stack') {
 if ($HostName -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') {
     throw '검증할 호스트 이름 형식이 올바르지 않습니다.'
 }
-$ExpectedCertificateSha256 = $ExpectedCertificateSha256.ToLowerInvariant()
-if ($ExpectedCertificateSha256 -notmatch '^[0-9a-f]{64}$') {
-    throw '예상 인증서 SHA-256 지문 형식이 올바르지 않습니다.'
+$parsedPublicIp = $null
+if ($CertificateMode -eq 'letsencrypt-ip') {
+    if (-not [System.Net.IPAddress]::TryParse($HostName, [ref]$parsedPublicIp) -or
+        $parsedPublicIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork -or
+        $parsedPublicIp.ToString() -cne $HostName) {
+        throw '공인 IPv4 인증서 모드는 선행 0이 없는 정확한 IPv4 주소가 필요합니다.'
+    }
+}
+else {
+    $ExpectedCertificateSha256 = $ExpectedCertificateSha256.ToLowerInvariant()
+    if ($ExpectedCertificateSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw '자체서명 인증서 모드는 예상 SHA-256 지문이 필요합니다.'
+    }
 }
 
 $endpointUri = "https://$HostName/api/v1/status/"
 $probeNonce = [Guid]::NewGuid().ToString('N')
 $probeUri = "$endpointUri`?probe=$probeNonce"
-if (-not ('QfcPinnedCertificateValidator' -as [type])) {
+if (-not ('QfcCertificateValidator' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Net.Http;
@@ -617,10 +642,10 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-public static class QfcPinnedCertificateValidator
+public static class QfcCertificateValidator
 {
     public static Func<HttpRequestMessage, X509Certificate2, X509Chain, SslPolicyErrors, bool>
-        Create(string expectedHostName, string expectedFingerprint)
+        CreatePinned(string expectedHostName, string expectedFingerprint)
     {
         return (request, certificate, chain, errors) =>
         {
@@ -655,13 +680,39 @@ public static class QfcPinnedCertificateValidator
             }
         };
     }
+
+    public static Func<HttpRequestMessage, X509Certificate2, X509Chain, SslPolicyErrors, bool>
+        CreatePublicIp(string expectedIp)
+    {
+        return (request, certificate, chain, errors) =>
+        {
+            if (certificate == null || request == null || request.RequestUri == null ||
+                errors != SslPolicyErrors.None ||
+                !StringComparer.Ordinal.Equals(request.RequestUri.Host, expectedIp))
+            {
+                return false;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            return now >= certificate.NotBefore.ToUniversalTime() &&
+                now < certificate.NotAfter.ToUniversalTime();
+        };
+    }
 }
 '@
 }
 
 $handler = [System.Net.Http.HttpClientHandler]::new()
-$handler.ServerCertificateCustomValidationCallback =
-    [QfcPinnedCertificateValidator]::Create($HostName, $ExpectedCertificateSha256)
+if ($CertificateMode -eq 'letsencrypt-ip') {
+    # SslPolicyErrors.None is produced only when the operating-system public
+    # trust chain and the raw-IP SAN both match this exact HTTPS request.
+    $handler.ServerCertificateCustomValidationCallback =
+        [QfcCertificateValidator]::CreatePublicIp($HostName)
+}
+else {
+    $handler.ServerCertificateCustomValidationCallback =
+        [QfcCertificateValidator]::CreatePinned($HostName, $ExpectedCertificateSha256)
+}
 
 $client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(30)
@@ -675,7 +726,7 @@ try {
     $status = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
 }
 catch {
-    throw '고정된 인증서 지문으로 QFieldCloud HTTPS 상태 endpoint를 검증하지 못했습니다.'
+    throw '선택한 인증서 신뢰 방식으로 QFieldCloud HTTPS 상태 endpoint를 검증하지 못했습니다.'
 }
 finally {
     $client.Dispose()
@@ -688,10 +739,10 @@ $endpointOk = ($databaseState -eq 'ok' -and $storageState -eq 'ok')
 $awsStateOk = ($instanceState -eq 'not-queried' -or $instanceState -eq 'running')
 $endpointCheck = if ($endpointOk -and $awsStateOk) { 'ok' } else { 'error' }
 $validationScope = if ($PSCmdlet.ParameterSetName -eq 'Stack') {
-    'cloudformation-create-gate-and-pinned-https-endpoint'
+    'cloudformation-create-gate-and-mode-aware-https-endpoint'
 }
 else {
-    'pinned-https-database-storage-only'
+    'mode-aware-https-database-storage-only'
 }
 $deploymentValidation = if ($PSCmdlet.ParameterSetName -eq 'Stack') {
     'bootstrap-wait-condition-verified'
@@ -712,8 +763,11 @@ else {
     Database              = $databaseState
     Storage               = $storageState
     Endpoint              = $endpointUri
-    CertificatePin        = 'matched'
-    CertificateValidity   = 'current-hostname-matched'
+    CertificateMode       = $CertificateMode
+    CertificateTrust      = if ($CertificateMode -eq 'letsencrypt-ip') { 'public-ca-chain-valid' } else { 'self-signed-fingerprint-matched' }
+    CertificateIdentity   = if ($CertificateMode -eq 'letsencrypt-ip') { 'public-ip-san-matched' } else { 'hostname-matched' }
+    CertificateValidity   = 'current'
+    CertificateRenewal    = if ($CertificateMode -eq 'letsencrypt-ip' -and $PSCmdlet.ParameterSetName -eq 'Stack') { 'scheduled-by-verified-bootstrap' } elseif ($CertificateMode -eq 'letsencrypt-ip') { 'inspect-with-full-health-command' } else { 'not-configured' }
     TerminationProtection = if ($PSCmdlet.ParameterSetName -eq 'Stack') { 'enabled' } else { 'not-queried' }
     FullHealthCommand     = 'sudo /opt/qfieldcloud/bin/health-check.sh'
     Qgis4Support          = 'disabled-unverified-upstream-image'

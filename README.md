@@ -7,7 +7,7 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 
 ## 현재 구현 상태
 
-확인 기준일은 **2026-08-23**입니다.
+확인 기준일은 **2026-08-24**입니다.
 
 - `lab-lightsail` 파일럿의 CloudFormation 템플릿, 배포 전 확인 도구, Docker Compose, 설치·상태·worker 시험·백업·격리 복원시험 도구가 구현되어 있습니다.
 - 비루트 관리자가 배포 역할과 권한 상한선을 만들고, 별도의 설치자가 접근키 없이 1시간 역할 세션으로 설치하는 흐름을 구현했습니다. 템플릿 문법과 로컬 계약은 검증했지만 새 계정의 실제 역할 전환 종단 간 시험은 아직 완료하지 않았습니다.
@@ -15,6 +15,7 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 - QGIS 3 worker만 허용합니다. 공식 `v26.25` QGIS 4 이미지의 내용이 기대와 달라 QGIS 4는 안전하게 실패하도록 비활성화했습니다.
 - **서울 리전의 새 빈 서버에서 commit `6288b495f49531b207546805fd1b1758dac940da`을 처음부터 배포해 CloudFormation `CREATE_COMPLETE`와 WaitCondition(설치 완료 대기 조건) 자동 완료, 외부 HTTPS의 DB·객체 저장소 `ok`, 서버 전체 상태 `overall=ok`를 확인했습니다.** 이전 파일럿의 완료 구문 소비 문제를 막는 `/dev/null` 수정도 로컬 재현 시험, GitHub Actions와 이 실제 재배포에서 검증됐습니다.
 - QGIS 3 worker의 프로젝트 처리·패키징·임시 컨테이너 정리는 `passed`, 최초 로컬 백업과 checksum(파일 무결성 값) 검사는 `passed-local-only`, 최신 백업의 격리 복원시험은 `schema-storage-integrity-passed`와 `restore_matches_latest=true`를 통과했습니다. 검사 대상으로 표시된 임시 복원 Docker 자원도 남지 않았습니다. 로컬 백업은 서버 삭제 시 함께 사라질 수 있고 별도 서버를 이용한 재해 복구 시험을 대신하지 않습니다.
+- 위 실제 AWS 검증은 기본값인 **`self-signed` 경로**의 결과입니다. 선택 기능 `letsencrypt-ip`은 고정 IPv4 자체를 주소로 쓰는 Let’s Encrypt 공인 인증서 발급·자동 갱신 코드를 추가했지만, **현재 AWS 스택에는 적용하지 않았고 실제 최초 발급·갱신 종단 간 시험도 아직 완료하지 않았습니다.** 구현됐다는 사실을 운영 검증 완료로 해석하면 안 됩니다.
 - `standard-aws`는 아직 Phase 1 설계 단계이며 실행 가능한 배포 도구가 없습니다.
 
 처음 설치를 검토한다면 [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md)를 먼저 읽으세요. 배포 명령은 기본적으로 계획만 확인하고, 사용자가 `-Execute`를 명시해야 자원을 만듭니다.
@@ -26,7 +27,8 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 | 리전 | 서울 `ap-northeast-2`만 허용 |
 | 서버 | Lightsail Linux 4GB RAM, 2 vCPU, 80GB SSD 한 대 |
 | 서버 안 구성 | QFieldCloud app·Nginx·worker, 전용 PostGIS, 로컬 S3 호환 저장소 |
-| 접속 | 고정 IPv4 기반 `IP.sslip.io`, 자체서명 TLS 인증서 |
+| TLS 접속 | 기본 `self-signed`: `https://IP.sslip.io/`와 자체서명 인증서. 선택 `letsencrypt-ip`: `https://<고정IPv4>/`와 Let’s Encrypt 공인 IP 인증서 |
+| 공인 인증서 선택 기능 | Certbot `5.7.0` 고정 이미지, 160시간 short-lived 인증서, 6시간마다 갱신 확인. 추가 AWS 자원·추가 AWS 직접 비용은 없지만 CA·인터넷·rate limit에 의존하며 실제 AWS 종단 간 검증 전 |
 | 백업 | 자동 snapshot 기본 사용, 최초 애플리케이션 백업·격리 복원시험은 설치 중 자동 실행, 이후 백업은 서버 로컬 디스크에 수동 생성 |
 | 삭제 보호 | 생성 시작부터 CloudFormation termination protection(삭제 방지) 활성화 |
 | 월 비용 추정 | 인스턴스만 약 **US$24** + 실제 자동 snapshot 저장량, snapshot 7개를 모두 80GB 완전 변경으로 계산한 보수적 상한 약 **US$52** |
@@ -64,7 +66,7 @@ flowchart LR
 
 | 항목 | `lab-lightsail` | `standard-aws` |
 |---|---|---|
-| 상태 | 파일럿 구현, 서울 리전 최신 빈 서버 자동 설치 검증 완료 | 설계 문서만 있음 |
+| 상태 | 기본 `self-signed`는 서울 리전 빈 서버 자동 설치 검증 완료, 선택 `letsencrypt-ip`은 실제 AWS 발급·갱신 검증 전 | 설계 문서만 있음 |
 | 목적 | 학습·내부 시험·소규모 검증 | 장기 운영·확장·다른 기관 배포 |
 | 컴퓨팅 | Lightsail 한 대 | EC2 한 대 이상 |
 | 시스템 DB | 같은 서버의 전용 PostgreSQL/PostGIS | 별도 RDS PostgreSQL/PostGIS |
@@ -78,6 +80,7 @@ flowchart LR
 | 문서 | 역할 |
 |---|---|
 | [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md) | 현재 구현의 계획, 설치, 확인, 백업, 복원시험과 삭제 |
+| [lab-lightsail 스크립트 구조](docs/diagrams/lab-lightsail-script-structure.md) | 로컬 설치 도구부터 서버 bootstrap, 인증서 분기와 운영 도구까지의 전체 흐름 |
 | [배포 권한 준비와 유지관리](docs/access-bootstrap.md) | 관리자 설정, 설치자 분리, 역할 기반 설치·갱신·제거 흐름 |
 | [아키텍처](docs/architecture.md) | 두 프로필의 구성과 데이터 경계 |
 | [비용](docs/costs.md) | Phase 1 비용 설계와 비용 증가 요인 |
@@ -99,3 +102,5 @@ Phase 1 실행서는 안전 기준을 기록한 설계 문서입니다. 현재 `
 - [QFieldCloud 공식 아키텍처](https://docs.qfield.org/reference/qfieldcloud/architecture/)
 - [AWS CloudFormation 공식 문서](https://docs.aws.amazon.com/cloudformation/)
 - [AWS Lightsail 가격](https://aws.amazon.com/lightsail/pricing/)
+- [Let’s Encrypt 6일·IP 주소 인증서 안내](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability.html)
+- [Certbot의 IP 주소 인증서 안내](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/)
