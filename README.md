@@ -13,8 +13,8 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 - 비루트 관리자가 배포 역할과 권한 상한선을 만들고, 별도의 설치자가 접근키 없이 1시간 역할 세션으로 설치하는 흐름을 구현했습니다. 템플릿 문법과 로컬 계약은 검증했지만 새 계정의 실제 역할 전환 종단 간 시험은 아직 완료하지 않았습니다.
 - QFieldCloud는 공식 릴리스 `v26.25`, Git commit(정확한 소스 저장 시점)과 `linux/amd64` 컨테이너 digest(이미지 내용 고유 식별자)로 고정합니다.
 - QGIS 3 worker만 허용합니다. 공식 `v26.25` QGIS 4 이미지의 내용이 기대와 달라 QGIS 4는 안전하게 실패하도록 비활성화했습니다.
-- **서울 리전의 실제 AWS 파일럿에서 QFieldCloud 설치, QGIS 3 worker 시험, 최초 백업, 격리 복원시험, 전체 서버 상태와 고정 인증서 HTTPS 상태를 확인했습니다.** 실행 중인 검증 대상은 commit `afea815a35bb69c8a0d97cddb5eaab92c4686986`입니다.
-- 이 배포에서는 설치가 끝난 뒤 Lightsail 시작 스크립트의 하위 명령이 표준입력에 남은 CloudFormation 완료 구문을 소비해 자동 완료 보고가 한 번 누락됐습니다. 서버 상태를 다시 검증한 뒤 완료 신호를 수동 보완했으며, 하위 설치 명령의 입력을 `/dev/null`로 분리하는 회귀 수정과 로컬 검사를 추가했습니다. **이 마지막 완료 보고 수정은 아직 빈 서버에서 처음부터 다시 배포해 검증하지 않았습니다.**
+- **서울 리전의 새 빈 서버에서 commit `6288b495f49531b207546805fd1b1758dac940da`을 처음부터 배포해 CloudFormation `CREATE_COMPLETE`와 WaitCondition(설치 완료 대기 조건) 자동 완료, 외부 HTTPS의 DB·객체 저장소 `ok`, 서버 전체 상태 `overall=ok`를 확인했습니다.** 이전 파일럿의 완료 구문 소비 문제를 막는 `/dev/null` 수정도 로컬 재현 시험, GitHub Actions와 이 실제 재배포에서 검증됐습니다.
+- QGIS 3 worker의 프로젝트 처리·패키징·임시 컨테이너 정리는 `passed`, 최초 로컬 백업과 checksum(파일 무결성 값) 검사는 `passed-local-only`, 최신 백업의 격리 복원시험은 `schema-storage-integrity-passed`와 `restore_matches_latest=true`를 통과했습니다. 검사 대상으로 표시된 임시 복원 Docker 자원도 남지 않았습니다. 로컬 백업은 서버 삭제 시 함께 사라질 수 있고 별도 서버를 이용한 재해 복구 시험을 대신하지 않습니다.
 - `standard-aws`는 아직 Phase 1 설계 단계이며 실행 가능한 배포 도구가 없습니다.
 
 처음 설치를 검토한다면 [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md)를 먼저 읽으세요. 배포 명령은 기본적으로 계획만 확인하고, 사용자가 `-Execute`를 명시해야 자원을 만듭니다.
@@ -64,7 +64,7 @@ flowchart LR
 
 | 항목 | `lab-lightsail` | `standard-aws` |
 |---|---|---|
-| 상태 | 파일럿 구현, 가장 최근 AWS 실패 수정 후 최신 재배포 전 | 설계 문서만 있음 |
+| 상태 | 파일럿 구현, 서울 리전 최신 빈 서버 자동 설치 검증 완료 | 설계 문서만 있음 |
 | 목적 | 학습·내부 시험·소규모 검증 | 장기 운영·확장·다른 기관 배포 |
 | 컴퓨팅 | Lightsail 한 대 | EC2 한 대 이상 |
 | 시스템 DB | 같은 서버의 전용 PostgreSQL/PostGIS | 별도 RDS PostgreSQL/PostGIS |
