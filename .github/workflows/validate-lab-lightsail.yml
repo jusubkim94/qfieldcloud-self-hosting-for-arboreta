@@ -35,6 +35,15 @@ jobs:
             }
           }
 
+      - name: Reproduce launcher input isolation
+        shell: pwsh
+        run: |
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          & $gitBash scripts/lab-lightsail/Test-LauncherInputIsolation.sh
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Launcher input isolation regression validation failed.'
+          }
+
       - name: Check onboarding and safety contracts
         shell: pwsh
         run: |
