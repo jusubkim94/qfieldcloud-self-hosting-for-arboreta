@@ -50,6 +50,9 @@ $workerSmokeText = Get-Content -Raw -LiteralPath (
 )
 $backupText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'backup.sh')
 $restoreTestText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'restore-test.sh')
+$certificateRenewText = Get-Content -Raw -LiteralPath (
+    Join-Path $PSScriptRoot 'certificate-renew.sh'
+)
 $scriptPaths = [ordered]@{
     Deploy  = Join-Path $PSScriptRoot 'Deploy-QFieldCloudPilot.ps1'
     Verify  = Join-Path $PSScriptRoot 'Test-QFieldCloudPilot.ps1'
@@ -143,10 +146,12 @@ Assert-Contract (
     $verifyText.Contains('$fingerprintProperties.Count -ne 1')
 ) 'The verifier can lose its single CloudFormation certificate fingerprint through PowerShell scalar unrolling.'
 Assert-Contract (
-    $verifyText.Contains('public static class QfcPinnedCertificateValidator') -and
-    $verifyText.Contains('[QfcPinnedCertificateValidator]::Create($HostName, $ExpectedCertificateSha256)') -and
+    $verifyText.Contains('public static class QfcCertificateValidator') -and
+    $verifyText.Contains('[QfcCertificateValidator]::CreatePinned($HostName, $ExpectedCertificateSha256)') -and
+    $verifyText.Contains('[QfcCertificateValidator]::CreatePublicIp($HostName)') -and
+    $verifyText.Contains('errors != SslPolicyErrors.None') -and
     -not $verifyText.Contains('ServerCertificateCustomValidationCallback = {')
-) 'The verifier must use a compiled TLS callback that does not require a PowerShell runspace on the HTTP worker thread.'
+) 'The verifier must use compiled, mode-aware TLS callbacks without a PowerShell runspace on the HTTP worker thread.'
 Assert-Contract (
     $deployText.Contains("[string]`$ApprovedCommitSha = ''") -and
     $deployText.Contains("[string]`$ApprovedPlanSha256 = ''") -and
@@ -220,6 +225,7 @@ $lockScriptTexts = [ordered]@{
     Backup      = $backupText
     RestoreTest = $restoreTestText
     WorkerSmoke = $workerSmokeText
+    CertificateRenew = $certificateRenewText
 }
 foreach ($lockScript in $lockScriptTexts.GetEnumerator()) {
     Assert-Contract (

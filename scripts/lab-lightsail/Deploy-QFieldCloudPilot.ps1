@@ -21,6 +21,11 @@ param(
 
     [bool]$EnableAlarms = $true,
 
+    [ValidateSet('self-signed', 'letsencrypt-ip')]
+    [string]$CertificateMode = 'self-signed',
+
+    [switch]$AcceptLetsEncryptTerms,
+
     [ValidatePattern('^(?:[01][0-9]|2[0-3]):00$')]
     [string]$AutomaticSnapshotTimeUtc = '18:00',
 
@@ -61,6 +66,12 @@ if (-not $Execute -and
     (-not [string]::IsNullOrWhiteSpace($ApprovedCommitSha) -or
         -not [string]::IsNullOrWhiteSpace($ApprovedPlanSha256))) {
     throw '승인 식별값은 -Execute 실행에서만 사용할 수 있습니다.'
+}
+if ($AcceptLetsEncryptTerms -and $CertificateMode -ne 'letsencrypt-ip') {
+    throw '-AcceptLetsEncryptTerms는 -CertificateMode letsencrypt-ip와 함께만 사용하세요.'
+}
+if ($Execute -and $CertificateMode -eq 'letsencrypt-ip' -and -not $AcceptLetsEncryptTerms) {
+    throw '공인 IPv4 인증서 발급 전 Lets Encrypt 이용약관 동의가 필요합니다. 검토 후 -AcceptLetsEncryptTerms를 추가하세요.'
 }
 
 $repositoryOwner = 'jusubkim94'
@@ -567,7 +578,11 @@ function Get-ReleaseManifestValue {
         [string[]]$Lines,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet('QFIELDCLOUD_COMMIT', 'QFIELDCLOUD_DHPARAM_SHA256')]
+        [ValidateSet(
+            'QFIELDCLOUD_COMMIT', 'QFIELDCLOUD_DHPARAM_SHA256',
+            'CERTBOT_IMAGE', 'CERTBOT_EXPECTED_VERSION',
+            'LETSENCRYPT_ACME_DIRECTORY', 'LETSENCRYPT_CERTIFICATE_PROFILE'
+        )]
         [string]$Name
     )
 
@@ -686,9 +701,25 @@ $qfieldCloudCommit = Get-ReleaseManifestValue `
 $expectedDhparamsSha256 = Get-ReleaseManifestValue `
     -Lines $releaseManifestLines `
     -Name QFIELDCLOUD_DHPARAM_SHA256
+$certbotImage = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name CERTBOT_IMAGE
+$certbotExpectedVersion = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name CERTBOT_EXPECTED_VERSION
+$letsEncryptAcmeDirectory = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name LETSENCRYPT_ACME_DIRECTORY
+$letsEncryptCertificateProfile = Get-ReleaseManifestValue `
+    -Lines $releaseManifestLines `
+    -Name LETSENCRYPT_CERTIFICATE_PROFILE
 if ($qfieldCloudCommit -notmatch '^[0-9a-f]{40}$' -or
-    $expectedDhparamsSha256 -notmatch '^[0-9a-f]{64}$') {
-    throw 'QFieldCloud 릴리스 manifest의 고정 commit 또는 DH parameters SHA-256 형식이 잘못되었습니다.'
+    $expectedDhparamsSha256 -notmatch '^[0-9a-f]{64}$' -or
+    $certbotImage -notmatch '^docker\.io/certbot/certbot@sha256:[0-9a-f]{64}$' -or
+    $certbotExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
+    $letsEncryptAcmeDirectory -cne 'https://acme-v02.api.letsencrypt.org/directory' -or
+    $letsEncryptCertificateProfile -cne 'shortlived') {
+    throw '릴리스 manifest의 QFieldCloud 또는 공인 인증서 고정 정보 형식이 잘못되었습니다.'
 }
 $dhparamsUrl = "$qfieldCloudRawBase/$qfieldCloudCommit/conf/nginx/dhparams/ssl-dhparams.pem"
 $dhparamsBytes = Get-PinnedHttpsBytes `
@@ -831,7 +862,7 @@ $physicalNameConflict = $instanceNameExists -or $staticIpNameExists -or $alarmNa
 $stackPolicy = '{"Statement":[{"Effect":"Deny","Action":"Update:*","Principal":"*","Resource":"*"}]}'
 
 $approvalPlan = [ordered]@{
-    ApprovalSchemaVersion          = 1
+    ApprovalSchemaVersion          = 2
     Region                         = $Region
     AvailabilityZone               = $AvailabilityZone
     StackName                       = $StackName
@@ -864,6 +895,14 @@ $approvalPlan = [ordered]@{
     Alarms                          = $EnableAlarms
     CpuAlarmThresholdPercent        = $CpuAlarmThresholdPercent
     SshAccessMode                   = $SshAccessMode
+    CertificateMode                = $CertificateMode
+    LetsEncryptTermsAccepted       = $AcceptLetsEncryptTerms.IsPresent
+    CertificateEndpoint            = if ($CertificateMode -eq 'letsencrypt-ip') { 'static-ipv4' } else { 'ip-sslip-io' }
+    CertificateLifetimeHours       = if ($CertificateMode -eq 'letsencrypt-ip') { 160 } else { 'self-signed-365-days' }
+    CertificateRenewalCheck        = if ($CertificateMode -eq 'letsencrypt-ip') { 'six-hours-plus-random-delay' } else { 'not-configured' }
+    CertificateAuthority           = if ($CertificateMode -eq 'letsencrypt-ip') { 'letsencrypt-external-dependency' } else { 'local-self-signed' }
+    CertificateAwsCost             = 'no-additional-aws-resource'
+    Http01ChallengePort            = if ($CertificateMode -eq 'letsencrypt-ip') { 80 } else { 'not-used' }
     StaticIpCostWhileAttached      = 'included'
     ManualSnapshotsAndOverage      = 'not-included'
     FailureRollback                = 'disabled-resources-preserved-and-billable'
@@ -876,6 +915,10 @@ $approvalPlan = [ordered]@{
     ReleaseManifestSha256          = $releaseManifestSha256
     QFieldCloudCommit               = $qfieldCloudCommit
     DhparamsSha256                  = $expectedDhparamsSha256
+    CertbotImage                    = $certbotImage
+    CertbotVersion                  = $certbotExpectedVersion
+    AcmeDirectory                   = $letsEncryptAcmeDirectory
+    AcmeCertificateProfile          = $letsEncryptCertificateProfile
     UpstreamDhparams               = 'official-commit-bytes-verified'
     ExistingArboretumDatabaseScope = 'not-accessed'
 }
@@ -913,12 +956,15 @@ if ($physicalNameConflict) {
 
 $snapshotValue = $EnableAutomaticSnapshots.ToString().ToLowerInvariant()
 $alarmsValue = $EnableAlarms.ToString().ToLowerInvariant()
+$letsEncryptTermsValue = $AcceptLetsEncryptTerms.IsPresent.ToString().ToLowerInvariant()
 $stackParameters = @(
     "ParameterKey=DeploymentRegion,ParameterValue=$Region",
     "ParameterKey=AvailabilityZone,ParameterValue=$AvailabilityZone",
     "ParameterKey=InstanceName,ParameterValue=$InstanceName",
     "ParameterKey=BlueprintId,ParameterValue=$blueprintId",
     "ParameterKey=BundleId,ParameterValue=$bundleId",
+    "ParameterKey=CertificateMode,ParameterValue=$CertificateMode",
+    "ParameterKey=LetsEncryptTermsAccepted,ParameterValue=$letsEncryptTermsValue",
     "ParameterKey=RepositoryOwner,ParameterValue=$repositoryOwner",
     "ParameterKey=RepositoryName,ParameterValue=$repositoryName",
     "ParameterKey=BootstrapPath,ParameterValue=$bootstrapPath",
@@ -954,7 +1000,10 @@ if ($LASTEXITCODE -ne 0) {
 $null = $deploymentOutput
 
 $stack = $null
-$maxStackPollAttempts = 300
+# The template can wait 150 minutes for certificate-aware bootstrap. Keep the
+# local observer alive for about 170 minutes so CloudFormation remains the
+# authoritative timeout even when create-request visibility is delayed.
+$maxStackPollAttempts = 340
 for ($attempt = 1; $attempt -le $maxStackPollAttempts; $attempt++) {
     try {
         $stack = Invoke-AwsJson -Arguments @(
@@ -997,14 +1046,15 @@ if ([string]$stack.Stacks[0].StackStatus -ne 'CREATE_COMPLETE') {
 }
 foreach ($requiredOutput in @(
     'InstanceName', 'HttpsUrl', 'AutomaticSnapshots', 'BootstrapRevision',
-    'BootstrapSha256', 'BootstrapValidationData'
+    'BootstrapSha256', 'BootstrapValidationData', 'CertificateMode'
 )) {
     if (-not $outputs.ContainsKey($requiredOutput)) {
         throw "완료된 스택 출력에 $requiredOutput 값이 없습니다."
     }
 }
 if ([string]$outputs['BootstrapRevision'] -cne $bootstrapRevision -or
-    [string]$outputs['BootstrapSha256'] -cne $bootstrapSha256) {
+    [string]$outputs['BootstrapSha256'] -cne $bootstrapSha256 -or
+    [string]$outputs['CertificateMode'] -cne $CertificateMode) {
     throw '완료된 스택의 bootstrap commit 또는 SHA-256이 검토한 로컬 파일과 다릅니다.'
 }
 try {
@@ -1026,6 +1076,8 @@ if ($certificateSha256 -notmatch '^[0-9a-f]{64}$') {
     BootstrapStatus      = 'verified-by-wait-condition'
     BootstrapSource      = 'expected-revision-and-sha256-matched'
     CertificateSha256    = $certificateSha256
+    CertificateMode      = $outputs['CertificateMode']
+    CertificateRenewal   = if ($CertificateMode -eq 'letsencrypt-ip') { 'scheduled-on-instance' } else { 'not-configured' }
     TerminationProtection = 'enabled'
     AutomaticSnapshot    = $outputs['AutomaticSnapshots']
 }

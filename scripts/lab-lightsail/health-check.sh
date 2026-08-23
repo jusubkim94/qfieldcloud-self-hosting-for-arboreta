@@ -37,8 +37,10 @@ versions_file="$install_root/versions.env"
 runtime_env="$install_root/state/runtime.env"
 compose_file="$install_root/compose.yaml"
 public_host_file="$install_root/state/public-host"
+certificate_mode_file="$install_root/state/certificate-mode"
 
-for required_file in "$versions_file" "$runtime_env" "$compose_file" "$public_host_file"; do
+for required_file in "$versions_file" "$runtime_env" "$compose_file" \
+  "$public_host_file" "$certificate_mode_file"; do
   if [[ ! -f $required_file ]]; then
     printf '{"overall":"error","reason":"installation-incomplete"}\n'
     exit 1
@@ -50,8 +52,31 @@ done
 source "$versions_file"
 
 public_host="$(<"$public_host_file")"
+certificate_mode="$(<"$certificate_mode_file")"
 if [[ ! $public_host =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   printf '{"overall":"error","reason":"invalid-public-host"}\n'
+  exit 1
+fi
+if [[ $certificate_mode != "self-signed" && $certificate_mode != "letsencrypt-ip" ]]; then
+  printf '{"overall":"error","reason":"invalid-certificate-mode"}\n'
+  exit 1
+fi
+
+is_canonical_ipv4() {
+  local value="$1"
+  local octet=""
+  local -a octets=()
+
+  [[ $value =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  IFS='.' read -r -a octets <<<"$value"
+  ((${#octets[@]} == 4)) || return 1
+  for octet in "${octets[@]}"; do
+    [[ $octet == "0" || $octet != 0* ]] || return 1
+    ((10#$octet <= 255)) || return 1
+  done
+}
+if [[ $certificate_mode == "letsencrypt-ip" ]] && ! is_canonical_ipv4 "$public_host"; then
+  printf '{"overall":"error","reason":"public-certificate-host-is-not-ipv4"}\n'
   exit 1
 fi
 
@@ -126,6 +151,7 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
     scripts/lab-lightsail/backup.sh
     scripts/lab-lightsail/restore-test.sh
     scripts/lab-lightsail/worker-smoke-test.sh
+    scripts/lab-lightsail/certificate-renew.sh
   )
   live_files_match="true"
   if [[ ! $approved_revision =~ ^[0-9a-f]{40}$ ]] || \
@@ -143,7 +169,7 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
   fi
   if [[ $live_files_match == "true" ]]; then
     for helper_name in health-check.sh show-admin-credentials.sh backup.sh \
-      restore-test.sh worker-smoke-test.sh; do
+      restore-test.sh worker-smoke-test.sh certificate-renew.sh; do
       if ! cmp -s -- "$install_root/bin/$helper_name" \
         "$installer_root/scripts/lab-lightsail/$helper_name"; then
         live_files_match="false"
@@ -185,17 +211,50 @@ if [[ $docker_state == "running" ]]; then
       ! docker image inspect "$QFC_QGIS3_IMAGE" >/dev/null 2>&1; }; then
     runtime_images_state="mismatch"
   fi
+  if [[ $runtime_images_state == "verified-pinned-image-objects" ]] && \
+    [[ $certificate_mode == "letsencrypt-ip" ]] && \
+    ! docker image inspect "$CERTBOT_IMAGE" >/dev/null 2>&1; then
+    runtime_images_state="mismatch"
+  fi
 fi
 
 protected_state_permissions="invalid"
 secrets_file="$install_root/state/secrets.env"
-certificate_key_file="$install_root/state/certs/qfieldcloud-key.pem"
+certificate_file="$install_root/state/certs/current/fullchain.pem"
+certificate_key_file="$install_root/state/certs/current/privkey.pem"
 if [[ $(stat -c '%u:%g:%a' "$install_root" 2>/dev/null || true) == "0:0:700" ]] && \
   [[ $(stat -c '%u:%g:%a' "$install_root/state" 2>/dev/null || true) == "0:0:700" ]] && \
+  [[ $(stat -c '%u:%g:%a' "$install_root/state/certs" 2>/dev/null || true) == "0:0:700" ]] && \
+  [[ $(stat -c '%u:%g:%a' "$install_root/state/certs/releases" 2>/dev/null || true) == "0:0:700" ]] && \
+  [[ $(stat -c '%u:%g:%a' "$public_host_file" 2>/dev/null || true) == "0:0:600" ]] && \
+  [[ $(stat -c '%u:%g:%a' "$certificate_mode_file" 2>/dev/null || true) == "0:0:600" ]] && \
   [[ $(stat -c '%u:%g:%a' "$runtime_env" 2>/dev/null || true) == "0:0:600" ]] && \
   [[ $(stat -c '%u:%g:%a' "$secrets_file" 2>/dev/null || true) == "0:0:600" ]] && \
+  [[ $(stat -c '%u:%g:%a' "$certificate_file" 2>/dev/null || true) == "0:0:600" ]] && \
   [[ $(stat -c '%u:%g:%a' "$certificate_key_file" 2>/dev/null || true) == "0:0:600" ]]; then
   protected_state_permissions="root-only"
+fi
+if [[ $protected_state_permissions == "root-only" ]] && \
+  [[ $certificate_mode == "letsencrypt-ip" ]]; then
+  for certbot_state_dir in "$install_root/state/certbot" \
+    "$install_root/state/certbot-work" "$install_root/state/certbot-log"; do
+    if [[ ! -d $certbot_state_dir || -L $certbot_state_dir ]] || \
+      [[ $(stat -c '%u:%g:%a' "$certbot_state_dir" 2>/dev/null || true) != "0:0:700" ]]; then
+      protected_state_permissions="invalid"
+      break
+    fi
+  done
+  if [[ $protected_state_permissions == "root-only" ]]; then
+    unsafe_certbot_file="$(
+      find "$install_root/state/certbot" -type f -perm /077 -print -quit 2>/dev/null || true
+    )"
+    unsafe_certbot_directory="$(
+      find "$install_root/state/certbot" -type d -perm /077 -print -quit 2>/dev/null || true
+    )"
+    if [[ -n $unsafe_certbot_file || -n $unsafe_certbot_directory ]]; then
+      protected_state_permissions="invalid"
+    fi
+  fi
 fi
 
 qgis3_state="missing"
@@ -242,34 +301,156 @@ if [[ -f $proj_release_file && ! -L $proj_release_file ]] && \
 fi
 
 certificate_state="invalid-or-expired"
-certificate_file="$install_root/state/certs/qfieldcloud.pem"
+certificate_renewal_state="invalid"
+certificate_not_after="unknown"
+last_certificate_check_at="not-run"
+last_certificate_renewal_at="not-run"
 certificate_fingerprint_file="$install_root/state/certificate-sha256"
 expected_certificate_sha256=""
 actual_certificate_sha256=""
+current_certificate_target=""
+current_certificate_real=""
 if [[ -f $certificate_fingerprint_file && ! -L $certificate_fingerprint_file ]]; then
   expected_certificate_sha256="$(<"$certificate_fingerprint_file")"
 fi
-if [[ -f $certificate_file && ! -L $certificate_file ]]; then
+if [[ -L $install_root/state/certs/current ]]; then
+  current_certificate_target="$(readlink "$install_root/state/certs/current")"
+  current_certificate_real="$(realpath -e "$install_root/state/certs/current" 2>/dev/null || true)"
+fi
+if [[ $current_certificate_target =~ ^releases/[A-Za-z0-9._-]+$ ]] && \
+  [[ $current_certificate_real == "$install_root/state/certs/releases/"* ]] && \
+  [[ -f $certificate_file && ! -L $certificate_file ]] && \
+  [[ -f $certificate_key_file && ! -L $certificate_key_file ]]; then
   actual_certificate_sha256="$(
     openssl x509 -in "$certificate_file" -outform DER 2>/dev/null \
       | sha256sum 2>/dev/null || true
   )"
   actual_certificate_sha256="${actual_certificate_sha256%% *}"
 fi
-if [[ $expected_certificate_sha256 =~ ^[0-9a-f]{64}$ ]] && \
-  [[ $actual_certificate_sha256 == "$expected_certificate_sha256" ]] && \
-  openssl x509 -in "$certificate_file" -checkend 0 -noout >/dev/null 2>&1 && \
-  openssl x509 -in "$certificate_file" -checkhost "$public_host" -noout >/dev/null 2>&1; then
-  certificate_state="current-hostname-and-fingerprint-matched"
+if [[ $certificate_mode == "self-signed" ]]; then
+  certificate_renewal_state="not-applicable-self-signed"
+  if [[ $expected_certificate_sha256 =~ ^[0-9a-f]{64}$ ]] && \
+    [[ $actual_certificate_sha256 == "$expected_certificate_sha256" ]] && \
+    openssl x509 -in "$certificate_file" -checkend 0 -noout >/dev/null 2>&1 && \
+    openssl x509 -in "$certificate_file" -checkhost "$public_host" -noout >/dev/null 2>&1; then
+    certificate_state="current-hostname-and-fingerprint-matched"
+  fi
+else
+  certificate_not_after_file="$install_root/state/certificate-not-after"
+  certificate_last_check_file="$install_root/state/certificate-last-check-at"
+  certificate_last_renewal_file="$install_root/state/certificate-last-renewal-at"
+  certificate_failure_file="$install_root/state/last-certificate-renewal-failure"
+  certbot_live_root="$install_root/state/certbot/live/qfieldcloud-ip"
+  current_public_ipv4=""
+  public_ipv4_matches="false"
+  certbot_certificate_sha256=""
+  live_certificate_sha256=""
+  key_matches="false"
+  certificate_public_key_sha256="$(
+    openssl x509 -in "$certificate_file" -pubkey -noout 2>/dev/null \
+      | openssl pkey -pubin -outform DER 2>/dev/null \
+      | sha256sum 2>/dev/null || true
+  )"
+  certificate_public_key_sha256="${certificate_public_key_sha256%% *}"
+  private_public_key_sha256="$(
+    openssl pkey -in "$certificate_key_file" -pubout -outform DER 2>/dev/null \
+      | sha256sum 2>/dev/null || true
+  )"
+  private_public_key_sha256="${private_public_key_sha256%% *}"
+  if [[ $certificate_public_key_sha256 =~ ^[0-9a-f]{64}$ ]] && \
+    [[ $certificate_public_key_sha256 == "$private_public_key_sha256" ]]; then
+    key_matches="true"
+  fi
+  if [[ -f $certbot_live_root/cert.pem && -f $certbot_live_root/chain.pem ]]; then
+    certbot_certificate_sha256="$(
+      openssl x509 -in "$certbot_live_root/cert.pem" -outform DER 2>/dev/null \
+        | sha256sum 2>/dev/null || true
+    )"
+    certbot_certificate_sha256="${certbot_certificate_sha256%% *}"
+  fi
+  live_certificate_output="$(
+    timeout --signal=TERM --kill-after=5s 20s \
+      openssl s_client -connect 127.0.0.1:443 -servername "$public_host" </dev/null 2>/dev/null || true
+  )"
+  live_certificate_sha256="$(
+    openssl x509 -outform DER 2>/dev/null <<<"$live_certificate_output" \
+      | sha256sum 2>/dev/null || true
+  )"
+  live_certificate_sha256="${live_certificate_sha256%% *}"
+  if [[ -f $certificate_not_after_file && ! -L $certificate_not_after_file ]]; then
+    certificate_not_after="$(<"$certificate_not_after_file")"
+  fi
+  if [[ -f $certificate_last_check_file && ! -L $certificate_last_check_file ]]; then
+    last_certificate_check_at="$(<"$certificate_last_check_file")"
+  fi
+  if [[ -f $certificate_last_renewal_file && ! -L $certificate_last_renewal_file ]]; then
+    last_certificate_renewal_at="$(<"$certificate_last_renewal_file")"
+  fi
+  actual_certificate_not_after_raw="$(openssl x509 -in "$certificate_file" -noout -enddate 2>/dev/null || true)"
+  actual_certificate_not_after_raw="${actual_certificate_not_after_raw#notAfter=}"
+  actual_certificate_not_after="$(date -u --date="$actual_certificate_not_after_raw" +%FT%TZ 2>/dev/null || true)"
+  certificate_check_epoch="$(date --date="$last_certificate_check_at" +%s 2>/dev/null || true)"
+  certificate_renewal_epoch="$(date --date="$last_certificate_renewal_at" +%s 2>/dev/null || true)"
+  now_epoch="$(date -u +%s)"
+  certificate_check_recent="false"
+  certificate_renewal_recent="false"
+  if [[ $certificate_check_epoch =~ ^[0-9]+$ ]] && \
+    ((now_epoch >= certificate_check_epoch)) && \
+    ((now_epoch - certificate_check_epoch <= 86400)); then
+    certificate_check_recent="true"
+  fi
+  if [[ $certificate_renewal_epoch =~ ^[0-9]+$ ]] && \
+    ((now_epoch >= certificate_renewal_epoch)) && \
+    ((now_epoch - certificate_renewal_epoch <= 604800)); then
+    certificate_renewal_recent="true"
+  fi
+  if ! current_public_ipv4="$(
+    curl --fail --silent --show-error --max-time 10 https://checkip.amazonaws.com \
+      | tr -d '[:space:]'
+  )"; then
+    current_public_ipv4=""
+  fi
+  if is_canonical_ipv4 "$current_public_ipv4" && [[ $current_public_ipv4 == "$public_host" ]]; then
+    public_ipv4_matches="true"
+  fi
+  if [[ $expected_certificate_sha256 =~ ^[0-9a-f]{64}$ ]] && \
+    [[ $actual_certificate_sha256 == "$expected_certificate_sha256" ]] && \
+    [[ $actual_certificate_sha256 == "$certbot_certificate_sha256" ]] && \
+    [[ $actual_certificate_sha256 == "$live_certificate_sha256" ]] && \
+    [[ $key_matches == "true" ]] && \
+    [[ ! -e $certificate_failure_file && ! -L $certificate_failure_file ]] && \
+    [[ $certificate_check_recent == "true" ]] && \
+    [[ $certificate_renewal_recent == "true" ]] && \
+    [[ $public_ipv4_matches == "true" ]] && \
+    [[ $certificate_not_after == "$actual_certificate_not_after" ]] && \
+    openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt \
+      -untrusted "$certbot_live_root/chain.pem" \
+      "$certbot_live_root/cert.pem" >/dev/null 2>&1 && \
+    openssl x509 -in "$certificate_file" -checkip "$public_host" -noout >/dev/null 2>&1 && \
+    openssl x509 -in "$certificate_file" -checkend 172800 -noout >/dev/null 2>&1; then
+    certificate_state="public-ca-ip-san-current"
+  fi
+  if [[ $certificate_state == "public-ca-ip-san-current" ]] && \
+    systemctl is-enabled --quiet qfieldcloud-certificate-renew.timer && \
+    systemctl is-active --quiet qfieldcloud-certificate-renew.timer; then
+    certificate_renewal_state="scheduled-and-healthy"
+  fi
 fi
 
 database_state="unreachable"
 storage_state="unreachable"
 status_nonce="$(date -u +%s%N)-$$-${RANDOM}"
-status_json="$(curl --fail --silent --show-error --cacert "$certificate_file" --max-time 20 \
-  --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
-  --resolve "$public_host:443:127.0.0.1" \
-  "https://$public_host/api/v1/status/?health_nonce=$status_nonce" 2>/dev/null || true)"
+if [[ $certificate_mode == "self-signed" ]]; then
+  status_json="$(curl --fail --silent --show-error --cacert "$certificate_file" --max-time 20 \
+    --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
+    --resolve "$public_host:443:127.0.0.1" \
+    "https://$public_host/api/v1/status/?health_nonce=$status_nonce" 2>/dev/null || true)"
+else
+  status_json="$(curl --fail --silent --show-error --max-time 20 \
+    --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
+    --connect-to "$public_host:443:127.0.0.1:443" \
+    "https://$public_host/api/v1/status/?health_nonce=$status_nonce" 2>/dev/null || true)"
+fi
 if jq -e 'type == "object"' >/dev/null 2>&1 <<<"$status_json"; then
   database_state="$(jq -r '.database // "missing"' <<<"$status_json")"
   storage_state="$(jq -r '.storage // "missing"' <<<"$status_json")"
@@ -348,7 +529,8 @@ if [[ $bootstrap_state_allowed == "true" && $docker_state == "running" && \
       $runtime_images_state == "verified-pinned-image-objects" && \
       $protected_state_permissions == "root-only" && \
       $qgis3_state == "verified" && $proj_data_state == "installed-and-verified" && \
-      $certificate_state == "current-hostname-and-fingerprint-matched" && \
+      $certificate_state =~ ^(current-hostname-and-fingerprint-matched|public-ca-ip-san-current)$ && \
+      $certificate_renewal_state =~ ^(not-applicable-self-signed|scheduled-and-healthy)$ && \
       $database_state == "ok" && $storage_state == "ok" && \
       $restore_test_orphan_state == "clear" ]]; then
   service_health="ok"
@@ -622,7 +804,12 @@ jq -cn \
   --arg qgis3 "$qgis3_state" \
   --arg qgis4 "disabled-unverified-upstream-image" \
   --arg proj_data "$proj_data_state" \
+  --arg certificate_mode "$certificate_mode" \
   --arg certificate "$certificate_state" \
+  --arg certificate_renewal "$certificate_renewal_state" \
+  --arg certificate_not_after "$certificate_not_after" \
+  --arg certificate_last_check_at "$last_certificate_check_at" \
+  --arg certificate_last_renewal_at "$last_certificate_renewal_at" \
   --arg database "$database_state" \
   --arg storage "$storage_state" \
   --arg recovery_validation "$recovery_validation" \
@@ -664,7 +851,12 @@ jq -cn \
     qgis3_image: $qgis3,
     qgis4: $qgis4,
     transformation_grids: $proj_data,
+    certificate_mode: $certificate_mode,
     tls_certificate: $certificate,
+    certificate_renewal: $certificate_renewal,
+    certificate_not_after: $certificate_not_after,
+    certificate_last_check_at: $certificate_last_check_at,
+    certificate_last_renewal_at: $certificate_last_renewal_at,
     database: $database,
     storage: $storage,
     recovery_validation: $recovery_validation,

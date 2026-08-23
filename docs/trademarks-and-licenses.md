@@ -20,6 +20,11 @@ MIT와 같은 오픈소스 라이선스는 소프트웨어를 사용할 권리�
 | smtp4dev 이미지 | `rnwood/smtp4dev:v3`의 고정 digest | [공식 smtp4dev 저장소](https://github.com/rnwood/smtp4dev) | 파일럿용 메일 시험 구성임을 표시하며 이미지와 포함 런타임의 고지를 확인합니다. |
 | Ofelia 이미지 | `mcuadros/ofelia:0.3.18`의 고정 digest | [공식 Ofelia 저장소](https://github.com/mcuadros/ofelia) | 예약 작업 실행기와 기반 이미지의 라이선스 고지를 확인합니다. |
 | Memcached 이미지 | `memcached:1`의 고정 digest | [공식 Memcached 저장소](https://github.com/memcached/memcached) | Memcached와 공식 컨테이너 기반 계층의 고지를 확인합니다. |
+| Certbot ACME client | `5.7.0`의 고정 `linux/amd64` digest | [Certbot `5.7.0` 릴리스](https://github.com/certbot/certbot/releases/tag/v5.7.0), [해당 태그의 Apache License 2.0](https://github.com/certbot/certbot/blob/v5.7.0/LICENSE.txt) | `letsencrypt-ip` 선택 모드에서만 실행합니다. Certbot 고지를 유지하고 이미지 안의 Python·OS 의존성 고지도 별도로 확인합니다. |
+
+Let’s Encrypt는 이 저장소에 포함해 재배포하는 소프트웨어가 아니라 외부 인증기관 서비스입니다. `letsencrypt-ip` 사용자는 설치 직전에 [Let’s Encrypt Subscriber Agreement와 정책 저장소](https://letsencrypt.org/repository/)를 읽고 `-AcceptLetsEncryptTerms`로 동의를 명시해야 합니다. Let’s Encrypt 이름은 선택한 인증서 발급 서비스를 설명하는 범위로만 사용하며 이 프로젝트가 ISRG 또는 Let’s Encrypt의 공식·승인 제품이라는 인상을 주지 않습니다.
+
+Certbot `5.7.0` 이미지와 자동화 코드는 정적 계약 검사를 대상으로 추가됐지만, 현재 AWS 스택에는 적용하지 않았고 실제 Let’s Encrypt 최초 발급·갱신 종단 간 시험 전입니다. 라이선스 기록은 기술 검증 완료나 서비스 가용성 보증을 뜻하지 않습니다.
 
 ## PROJ-data 라이선스 목록
 
@@ -41,6 +46,7 @@ PROJ-data는 좌표 변환용 여러 기관의 격자를 모은 데이터 묶음
 - 저장소와 README 상단에 독립적인 비공식 프로젝트임을 한국어와 영어로 표시합니다.
 - QFieldCloud 소스 고지와 PROJ-data 파일별 고지를 제거하지 않습니다.
 - 컨테이너 digest, 사람이 읽는 버전, 공식 출처와 확인 날짜를 함께 기록합니다.
+- `letsencrypt-ip`을 제공할 때 Certbot 라이선스 고지와 현재 Let’s Encrypt 약관 링크를 함께 유지합니다.
 - 컨테이너를 우리 registry로 복제하거나 수정 이미지를 공개하기 전에 이미지 안의 OS·언어 패키지까지 포함한 라이선스 목록과 소스 제공 의무를 다시 확인합니다.
 - 공식 로고, 화면 자산 또는 홍보 문구를 추가하려면 별도의 사용 허가나 최신 공식 지침이 있는지 먼저 확인합니다.
 - 라이선스 또는 상표 조건이 불명확하면 공개 범위를 넓히지 않고 권리자나 법률 전문가에게 확인합니다.

@@ -21,6 +21,8 @@ Metadata:
           - InstanceName
           - BlueprintId
           - BundleId
+          - CertificateMode
+          - LetsEncryptTermsAccepted
       - Label:
           default: Pinned bootstrap source
         Parameters:
@@ -68,6 +70,10 @@ Metadata:
         default: High CPU threshold (%)
       SshAccessMode:
         default: Port 22 access
+      CertificateMode:
+        default: TLS certificate mode
+      LetsEncryptTermsAccepted:
+        default: Let’s Encrypt subscriber agreement accepted
   Project:
     Name: qfieldcloud-self-hosting-for-arboreta
     Profile: lab-lightsail
@@ -78,6 +84,7 @@ Metadata:
     - UserData downloads a file first, verifies SHA-256, and only then executes it.
     - Bootstrap output is written to a root-only file instead of the CloudFormation output.
     - A stack-local wait handle gates completion and is never emitted as an output or log value.
+    - Public certificate mode exposes only the existing HTTP port 80 challenge path and stores ACME state root-only.
   UpdateNotes:
     - This pilot installer supports creating a new stack only; its deployment script rejects an existing stack name.
     - In-place changes to Lightsail instance properties are not a supported update path for this pilot.
@@ -130,6 +137,27 @@ Parameters:
     AllowedValues:
       - medium_3_0
     Description: Lightsail Linux bundle with 4 GB RAM for the lab pilot.
+
+  CertificateMode:
+    Type: String
+    Default: self-signed
+    AllowedValues:
+      - self-signed
+      - letsencrypt-ip
+    Description: >-
+      self-signed keeps the existing IP.sslip.io lab certificate. letsencrypt-ip
+      requests a short-lived public certificate for the attached static IPv4 and
+      installs a root-owned six-hour renewal check.
+
+  LetsEncryptTermsAccepted:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Must be true for letsencrypt-ip mode. It records acceptance of the Let’s
+      Encrypt Subscriber Agreement; no email address or secret is stored here.
 
   RepositoryOwner:
     Type: String
@@ -244,9 +272,18 @@ Rules:
             - '0000000000000000000000000000000000000000000000000000000000000000'
         AssertDescription: Replace the all-zero placeholder with the verified file SHA-256.
 
+  PublicCertificateTermsMustBeAccepted:
+    RuleCondition: !Equals [!Ref CertificateMode, letsencrypt-ip]
+    Assertions:
+      - Assert: !Equals [!Ref LetsEncryptTermsAccepted, 'true']
+        AssertDescription: >-
+          Accept the Let’s Encrypt Subscriber Agreement before selecting
+          letsencrypt-ip certificate mode.
+
 Conditions:
   AutomaticSnapshotsEnabled: !Equals [!Ref EnableAutomaticSnapshots, 'true']
   AlarmsEnabled: !Equals [!Ref EnableAlarms, 'true']
+  PublicCertificateEnabled: !Equals [!Ref CertificateMode, letsencrypt-ip]
 
 Resources:
   BootstrapWaitHandle:
@@ -317,7 +354,7 @@ Resources:
         readonly raw_url='https://raw.githubusercontent.com/${RepositoryOwner}/${RepositoryName}/${BootstrapRevision}/${BootstrapPath}'
         readonly bootstrap_file="$state_dir/bootstrap.sh"
         readonly bootstrap_log="$state_dir/bootstrap.log"
-        readonly bootstrap_timeout_seconds='4800'
+        readonly bootstrap_timeout_seconds='6000'
         readonly certificate_fingerprint_file="$install_root/state/certificate-sha256"
         readonly health_check_file="$install_root/bin/health-check.sh"
         IFS= read -r wait_handle <<'QFC_WAIT_HANDLE_V1'
@@ -486,9 +523,10 @@ Resources:
           --repository-url "$repository_url" \
           --revision "$revision" \
           --install-root "$install_root" \
+          --certificate-mode '${CertificateMode}' \
           </dev/null \
           >"$bootstrap_log" 2>&1; then
-          printf '%s\n' 'Bootstrap execution failed, exceeded its 80-minute work limit, or could not finish shutdown within 10 minutes; inspect /var/lib/qfieldcloud-bootstrap/bootstrap.log as root.' >&2
+          printf '%s\n' 'Bootstrap execution failed, exceeded its 100-minute work limit, or could not finish shutdown within 10 minutes; inspect /var/lib/qfieldcloud-bootstrap/bootstrap.log as root.' >&2
           exit 1
         fi
         chmod 0600 "$bootstrap_log"
@@ -526,9 +564,9 @@ Resources:
     Properties:
       Count: 1
       Handle: !Ref BootstrapWaitHandle
-      # Known launcher bounds total 6,705 seconds; 7,800 leaves more than
+      # Known launcher bounds total 7,905 seconds; 9,000 leaves more than
       # 15 minutes for instance boot, local work, and the final signal.
-      Timeout: '7800'
+      Timeout: '9000'
 
   StatusCheckFailedAlarm:
     Type: AWS::Lightsail::Alarm
@@ -585,25 +623,42 @@ Outputs:
 
   HttpUrl:
     Description: >-
-      Lab hostname derived from the static IPv4 address. HTTP redirects to HTTPS.
-      sslip.io is a third-party wildcard DNS service used only by this lab profile.
-    Value: !Sub
-      - 'http://${IpAddress}.sslip.io/'
-      - IpAddress: !GetAtt StaticIp.IpAddress
+      Public HTTP address. Only the ACME challenge path remains on HTTP; other
+      requests redirect to HTTPS. Self-signed mode uses third-party sslip.io.
+    Value: !If
+      - PublicCertificateEnabled
+      - !Sub
+        - 'http://${IpAddress}/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+      - !Sub
+        - 'http://${IpAddress}.sslip.io/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
 
   HttpsUrl:
     Description: >-
-      Lab HTTPS URL. The bootstrap initially creates a self-signed certificate,
-      so clients must verify it out of band before accepting it.
-    Value: !Sub
-      - 'https://${IpAddress}.sslip.io/'
-      - IpAddress: !GetAtt StaticIp.IpAddress
+      Lab HTTPS URL. Public certificate mode uses the static IPv4 directly;
+      self-signed mode requires out-of-band fingerprint verification.
+    Value: !If
+      - PublicCertificateEnabled
+      - !Sub
+        - 'https://${IpAddress}/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+      - !Sub
+        - 'https://${IpAddress}.sslip.io/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
 
   PilotHostName:
     Description: Public lab hostname; no credential is included.
-    Value: !Sub
-      - '${IpAddress}.sslip.io'
-      - IpAddress: !GetAtt StaticIp.IpAddress
+    Value: !If
+      - PublicCertificateEnabled
+      - !GetAtt StaticIp.IpAddress
+      - !Sub
+        - '${IpAddress}.sslip.io'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+
+  CertificateMode:
+    Description: Selected TLS certificate and renewal mode.
+    Value: !Ref CertificateMode
 
   BootstrapRevision:
     Description: Public Git commit used to retrieve the verified bootstrap file.
@@ -616,7 +671,8 @@ Outputs:
   BootstrapValidationData:
     Description: >-
       Authenticated CloudFormation wait-condition data. It maps the fixed
-      qfieldcloud-bootstrap signal ID to the public TLS certificate SHA-256.
+      qfieldcloud-bootstrap signal ID to the initial validated TLS certificate
+      SHA-256. Public certificate renewal can legitimately change this value later.
     Value: !GetAtt BootstrapWaitCondition.Data
 
   BootstrapStatusFile:

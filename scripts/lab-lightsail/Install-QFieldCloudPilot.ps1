@@ -23,6 +23,11 @@ param(
 
     [bool]$EnableAlarms = $true,
 
+    [ValidateSet('self-signed', 'letsencrypt-ip')]
+    [string]$CertificateMode = 'self-signed',
+
+    [switch]$AcceptLetsEncryptTerms,
+
     [bool]$Authenticate = $true,
 
     [switch]$Execute
@@ -30,6 +35,13 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($AcceptLetsEncryptTerms -and $CertificateMode -ne 'letsencrypt-ip') {
+    throw '-AcceptLetsEncryptTerms는 -CertificateMode letsencrypt-ip와 함께만 사용하세요.'
+}
+if ($Execute -and $CertificateMode -eq 'letsencrypt-ip' -and -not $AcceptLetsEncryptTerms) {
+    throw '공인 IPv4 인증서 발급 전 Lets Encrypt 이용약관 동의가 필요합니다. 검토 후 -AcceptLetsEncryptTerms를 추가하세요.'
+}
 
 $region = 'ap-northeast-2'
 $deploymentRoleName = 'QFieldCloudLabDeployer'
@@ -461,9 +473,13 @@ $deployArguments = @(
     '-ExpectedAccountId', $ExpectedAccountId,
     '-ExpectedDeploymentRoleArn', $deploymentRoleArn,
     '-AvailabilityZone', $AvailabilityZone,
+    '-CertificateMode', $CertificateMode,
     "-EnableAutomaticSnapshots:$($EnableAutomaticSnapshots.ToString().ToLowerInvariant())",
     "-EnableAlarms:$($EnableAlarms.ToString().ToLowerInvariant())"
 )
+if ($AcceptLetsEncryptTerms) {
+    $deployArguments += '-AcceptLetsEncryptTerms'
+}
 
 Push-Location -LiteralPath $repositoryRoot
 try {
