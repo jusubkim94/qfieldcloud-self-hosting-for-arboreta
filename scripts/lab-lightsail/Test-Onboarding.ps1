@@ -171,6 +171,14 @@ Assert-Contract (
         '(?s)from django\.contrib\.auth import get_user_model.*?get_user_model\(\)\.objects\.create_superuser\('
     )
 ) 'The QFieldCloud administrator must be created as a Person so its initial subscription can reference an existing Person row.'
+$djangoShellBlocks = [regex]::Matches(
+    $bootstrapText,
+    "(?ms)app python manage\.py shell -c '\r?\n(?<Script>.*?)\r?\n'"
+)
+Assert-Contract (
+    $djangoShellBlocks.Count -eq 2 -and
+    @($djangoShellBlocks | Where-Object { $_.Groups['Script'].Value.Contains("'") }).Count -eq 0
+) 'Single-quoted Django shell blocks must not contain apostrophes that terminate the surrounding shell string.'
 Assert-Contract (
     $bootstrapText.Contains('curl --fail --silent --show-error --connect-timeout 5 --max-time 20')
 ) 'The initial HTTPS health gate must bound both connection and total request time.'

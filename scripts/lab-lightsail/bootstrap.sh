@@ -971,7 +971,7 @@ from qfieldcloud.core.models import Person
 password = sys.stdin.read()
 if not password:
     raise SystemExit("empty bootstrap password")
-# QFieldCloud v26.25's AUTH_USER_MODEL is the base User, while initial
+# The AUTH_USER_MODEL in QFieldCloud v26.25 is the base User, while initial
 # subscription creation requires the concrete Person row to exist.
 Person.objects.create_superuser(
     username=os.environ["QFC_BOOTSTRAP_ADMIN_USERNAME"],
