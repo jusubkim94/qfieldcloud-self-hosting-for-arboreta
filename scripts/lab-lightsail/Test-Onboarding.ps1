@@ -404,6 +404,23 @@ Assert-Contract (
     $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$operational_file"') -and
     $restoreTestText.Contains('stat -c ''%u:%g:%a'' "$operational_health_check_file"')
 ) 'Backup or isolated-restore paths can bypass their root ownership and mode contract.'
+Assert-Contract (
+    $restoreTestText.Contains('temporary_database="qfc_restore_test_$(openssl rand -hex 6)"') -and
+    $restoreTestText.Contains('^qfc_restore_test_[0-9a-f]{12}$') -and
+    $restoreTestText.Contains('createdb --template template0 --username "$operational_db_user"') -and
+    $restoreTestText.Contains('dropdb --if-exists --force --username "$operational_db_user"') -and
+    $restoreTestText.Contains('A previous restore test left a namespaced temporary database behind; inspect it before retrying.') -and
+    $restoreTestText.Contains('SELECT count(*) FROM pg_database WHERE datname = :''restore_database'';') -and
+    $restoreTestText.Contains('[[ $database_count == "0" ]]') -and
+    $restoreTestText.Contains('docker network connect --alias db "$network_name" "$operational_db_container"') -and
+    $restoreTestText.Contains('disconnect_operational_database_network || cleanup_failed=1') -and
+    $restoreTestText.Contains('read_env_value "$operational_versions_file" POSTGIS_IMAGE') -and
+    $restoreTestText.Contains('[[ $operational_postgis_image == "$postgis_image" ]]') -and
+    $restoreTestText.Contains('operational_compose stop rustfs smtp4dev memcached') -and
+    -not $restoreTestText.Contains('operational_compose stop db') -and
+    -not $restoreTestText.Contains('qfc_restoretest_db_') -and
+    -not $restoreTestText.Contains('qfc-restoretest-db-')
+) 'The 4 GiB restore test can target an unsafe database name, leak its temporary database, or start a second PostGIS instance.'
 
 $deployTokens = $null
 $deployErrors = $null

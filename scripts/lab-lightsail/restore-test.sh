@@ -66,7 +66,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 for required_command in awk cat chmod date df docker find flock gzip install jq ln mktemp \
-  mv openssl readlink realpath rm seq sha256sum sleep sort stat tar; do
+  mv openssl readlink realpath rm seq sha256sum sleep sort stat tar tr; do
   command -v "$required_command" >/dev/null 2>&1 \
     || die "Required command is unavailable: $required_command"
 done
@@ -522,10 +522,36 @@ if ! rustfs_access_key="$(
   die "The protected backup credentials are incomplete."
 fi
 
+if ! operational_db_user="$(
+  read_env_value "$operational_runtime_env" POSTGRES_USER
+)" || ! operational_db_password="$(
+  read_env_value "$operational_runtime_env" POSTGRES_PASSWORD
+)" || ! operational_postgis_image="$(
+  read_env_value "$operational_versions_file" POSTGIS_IMAGE
+)"; then
+  die "The protected operational database settings are incomplete."
+fi
+
 if [[ ! $rustfs_access_key =~ ^[A-Za-z0-9_-]{8,128}$ ]] \
-  || [[ ! $rustfs_secret_key =~ ^[A-Za-z0-9_-]{16,256}$ ]]; then
+  || [[ ! $rustfs_secret_key =~ ^[A-Za-z0-9_-]{16,256}$ ]] \
+  || [[ ! $operational_db_user =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ ]] \
+  || [[ ! $operational_db_password =~ ^[0-9a-f]{64}$ ]]; then
   die "The protected backup credentials have an unsafe format."
 fi
+[[ $operational_postgis_image == "$postgis_image" ]] \
+  || die "The running PostGIS image does not match the selected backup."
+
+if ! stale_restore_database_count="$(
+  operational_compose exec --no-TTY db \
+    psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+      --username "$operational_db_user" --dbname postgres \
+      --command "SELECT count(*) FROM pg_database WHERE datname ~ '^qfc_restore_test_[0-9a-f]{12}$';" \
+    2>/dev/null | tr -d '\r'
+)"; then
+  die "The operational QFieldCloud database service could not be inspected safely."
+fi
+[[ $stale_restore_database_count == "0" ]] \
+  || die "A previous restore test left a namespaced temporary database behind; inspect it before retrying."
 
 for pinned_image in "$postgis_image" "$rustfs_image" "$app_image"; do
   if ! docker image inspect "$pinned_image" >/dev/null 2>&1; then
@@ -552,20 +578,21 @@ fi
 
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-$(openssl rand -hex 4)"
 network_name="qfc-restoretest-$run_id"
-db_volume="qfc_restoretest_db_$run_id"
 rustfs_volume="qfc_restoretest_rustfs_$run_id"
 media_volume="qfc_restoretest_media_$run_id"
-db_container="qfc-restoretest-db-$run_id"
 rustfs_container="qfc-restoretest-rustfs-$run_id"
 app_check_container="qfc-restoretest-app-check-$run_id"
 storage_check_container="qfc-restoretest-storage-check-$run_id"
+temporary_database="qfc_restore_test_$(openssl rand -hex 6)"
 
 network_created="false"
-db_volume_created="false"
 rustfs_volume_created="false"
 media_volume_created="false"
 temporary_env_file=""
 operational_services_quiesced="false"
+operational_db_container=""
+operational_db_network_attached="false"
+temporary_database_created="false"
 worker_quiesce_blocked="false"
 recovery_marker_owned="false"
 recovery_marker_identity=""
@@ -680,6 +707,39 @@ remove_owned_network() {
   docker network rm "$target_network" >/dev/null 2>&1
 }
 
+drop_owned_temporary_database() {
+  local database_count=""
+
+  [[ $temporary_database_created == "true" ]] || return 0
+  [[ $temporary_database =~ ^qfc_restore_test_[0-9a-f]{12}$ ]] || {
+    echo "Refusing to drop a database outside the restore-test namespace." >&2
+    return 1
+  }
+  [[ $operational_db_user =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ ]] || return 1
+
+  operational_compose exec --no-TTY db \
+    dropdb --if-exists --force --username "$operational_db_user" \
+    "$temporary_database" >/dev/null 2>&1 || return 1
+  database_count="$(
+    operational_compose exec --no-TTY db \
+      psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+        --username "$operational_db_user" --dbname postgres \
+        --set "restore_database=$temporary_database" \
+        --command "SELECT count(*) FROM pg_database WHERE datname = :'restore_database';" \
+      2>/dev/null | tr -d '\r'
+  )" || return 1
+  [[ $database_count == "0" ]] || return 1
+  temporary_database_created="false"
+}
+
+disconnect_operational_database_network() {
+  [[ $operational_db_network_attached == "true" ]] || return 0
+  [[ $operational_db_container =~ ^[0-9a-f]{64}$ ]] || return 1
+  docker network disconnect "$network_name" "$operational_db_container" \
+    >/dev/null 2>&1 || return 1
+  operational_db_network_attached="false"
+}
+
 verify_no_owned_restore_resources() {
   local remaining_containers=""
   local remaining_volumes=""
@@ -737,16 +797,14 @@ cleanup() {
   remove_owned_container "$storage_check_container" || cleanup_failed=1
   remove_owned_container "$app_check_container" || cleanup_failed=1
   remove_owned_container "$rustfs_container" || cleanup_failed=1
-  remove_owned_container "$db_container" || cleanup_failed=1
+  drop_owned_temporary_database || cleanup_failed=1
+  disconnect_operational_database_network || cleanup_failed=1
 
   if [[ $media_volume_created == "true" ]]; then
     remove_owned_volume "$media_volume" || cleanup_failed=1
   fi
   if [[ $rustfs_volume_created == "true" ]]; then
     remove_owned_volume "$rustfs_volume" || cleanup_failed=1
-  fi
-  if [[ $db_volume_created == "true" ]]; then
-    remove_owned_volume "$db_volume" || cleanup_failed=1
   fi
   if [[ $network_created == "true" ]]; then
     remove_owned_network "$network_name" || cleanup_failed=1
@@ -841,8 +899,8 @@ write_state_marker() {
 }
 
 failure_stage="temporary-resource-preflight"
-for resource_name in "$network_name" "$db_volume" "$rustfs_volume" \
-  "$media_volume" "$db_container" "$rustfs_container" "$app_check_container" \
+for resource_name in "$network_name" "$rustfs_volume" \
+  "$media_volume" "$rustfs_container" "$app_check_container" \
   "$storage_check_container"; do
   if docker network inspect "$resource_name" >/dev/null 2>&1 \
     || docker volume inspect "$resource_name" >/dev/null 2>&1 \
@@ -874,7 +932,12 @@ if [[ -n $running_worker_children ]]; then
   die "A QGIS worker child is still running after worker_wrapper stopped; restore testing is blocked."
 fi
 operational_compose stop app
-operational_compose stop db rustfs smtp4dev memcached
+operational_compose stop rustfs smtp4dev memcached
+operational_db_container="$(operational_compose ps --quiet db | tr -d '\r')"
+if [[ ! $operational_db_container =~ ^[0-9a-f]{64}$ ]] \
+  || [[ $(docker container inspect --format '{{.State.Running}}' "$operational_db_container") != "true" ]]; then
+  die "The operational QFieldCloud database container is not running safely."
+fi
 
 mem_available_kib="$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)"
 if [[ ! $mem_available_kib =~ ^[0-9]+$ ]]; then
@@ -891,8 +954,8 @@ docker network create \
   "$network_name" >/dev/null
 network_created="true"
 
-docker volume create --label "$resource_label_key=$run_id" "$db_volume" >/dev/null
-db_volume_created="true"
+docker network connect --alias db "$network_name" "$operational_db_container"
+operational_db_network_attached="true"
 docker volume create --label "$resource_label_key=$run_id" "$rustfs_volume" >/dev/null
 rustfs_volume_created="true"
 docker volume create --label "$resource_label_key=$run_id" "$media_volume" >/dev/null
@@ -967,14 +1030,13 @@ fi
 
 temporary_env_file="$(mktemp "$runtime_temp_root/restore-test-$run_id.env.XXXXXX")"
 chmod 0600 "$temporary_env_file"
-database_password="$(openssl rand -hex 32)"
 temporary_secret_key="$(openssl rand -hex 64)"
 temporary_salt_key="$(openssl rand -hex 32)"
 cat >"$temporary_env_file" <<EOF
-POSTGRES_DB=qfc_restore_test
-POSTGRES_DB_TEST=test_qfc_restore_test
-POSTGRES_USER=qfc_restore_admin
-POSTGRES_PASSWORD=$database_password
+POSTGRES_DB=$temporary_database
+POSTGRES_DB_TEST=test_$temporary_database
+POSTGRES_USER=$operational_db_user
+POSTGRES_PASSWORD=$operational_db_password
 POSTGRES_HOST=db
 POSTGRES_PORT=5432
 POSTGRES_SSLMODE=disable
@@ -1029,80 +1091,70 @@ QFIELDCLOUD_QGIS4_IMAGE_NAME=disabled.invalid/qfieldcloud-qgis4:restore-test
 QFIELDCLOUD_TRANSFORMATION_GRIDS_VOLUME_NAME=qfc-restore-test-unused
 EOF
 
-# Only the temporary, internal Docker network is attached. The operational
-# QFieldCloud network, volumes, database, and any arboretum PostGIS are never
-# referenced by this restore test.
+# The pinned QFieldCloud PostGIS container stays running to avoid starting a
+# second PostgreSQL process on the 4 GiB lab host. The dump is restored only
+# into a generated database whose name is restricted to the restore-test
+# namespace. The operational QFieldCloud database and any arboretum PostGIS are
+# never selected as a restore target.
 failure_stage="isolated-database-restore"
-docker run --detach \
-  --memory 768m \
-  --memory-swap 768m \
-  --name "$db_container" \
-  --label "$resource_label_key=$run_id" \
-  --network "$network_name" \
-  --network-alias db \
-  --env-file "$temporary_env_file" \
-  --mount "type=volume,source=$db_volume,target=/var/lib/postgresql/data" \
-  "$postgis_image" >/dev/null
-
-database_ready="false"
-for _ in $(seq 1 90); do
-  if docker exec "$db_container" \
-    pg_isready --username qfc_restore_admin --dbname qfc_restore_test \
-    >/dev/null 2>&1; then
-    database_ready="true"
-    break
-  fi
-  sleep 2
-done
-[[ $database_ready == "true" ]] || die "The temporary PostGIS did not become ready."
-
-# The variables in this single-quoted command are intentionally expanded by
-# /bin/sh inside the isolated temporary database container.
-# shellcheck disable=SC2016
-if ! docker exec --interactive "$db_container" \
+if ! operational_compose exec --no-TTY db \
   pg_restore --list <"$backup_dir/data/database.dump" >/dev/null 2>&1; then
-  die "The database dump catalog could not be read in the temporary container."
+  die "The database dump catalog could not be read in the pinned PostGIS container."
 fi
-if ! docker exec --interactive "$db_container" /bin/sh -ceu '
-  PGPASSWORD="$POSTGRES_PASSWORD" pg_restore \
+if ! operational_compose exec --no-TTY db \
+  createdb --template template0 --username "$operational_db_user" \
+    "$temporary_database" >/dev/null 2>&1; then
+  die "The generated restore-test database could not be created."
+fi
+temporary_database_created="true"
+
+if ! operational_compose exec --no-TTY db \
+  pg_restore \
     --exit-on-error \
     --single-transaction \
     --no-owner \
     --no-privileges \
-    --username "$POSTGRES_USER" \
-    --dbname "$POSTGRES_DB" >/dev/null
-
-  postgis_count="$(
-    PGPASSWORD="$POSTGRES_PASSWORD" psql \
-      --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
-      --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-      --command "SELECT count(*) FROM pg_extension WHERE extname = '\''postgis'\'';"
-  )"
-  test "$postgis_count" -eq 1
-
-  migration_count="$(
-    PGPASSWORD="$POSTGRES_PASSWORD" psql \
-      --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
-      --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-      --command "SELECT count(*) FROM public.django_migrations;"
-  )"
-  test "$migration_count" -gt 0
-
-  qfieldcloud_table_count="$(
-    PGPASSWORD="$POSTGRES_PASSWORD" psql \
-      --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
-      --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-      --command "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('\''public.django_migrations'\''), to_regclass('\''public.core_user'\''));"
-  )"
-  test "$qfieldcloud_table_count" -eq 2
-
-  PGPASSWORD="$POSTGRES_PASSWORD" psql \
-    --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
-    --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-    --command "SELECT postgis_full_version();" >/dev/null
-' <"$backup_dir/data/database.dump" >/dev/null 2>&1; then
+    --username "$operational_db_user" \
+    --dbname "$temporary_database" \
+    <"$backup_dir/data/database.dump" >/dev/null 2>&1; then
   die "The PostgreSQL dump failed its isolated restore validation."
 fi
+
+postgis_count="$(
+  operational_compose exec --no-TTY db \
+    psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+      --username "$operational_db_user" --dbname "$temporary_database" \
+      --command "SELECT count(*) FROM pg_extension WHERE extname = 'postgis';" \
+    2>/dev/null | tr -d '\r'
+)"
+[[ $postgis_count == "1" ]] \
+  || die "The restored database does not contain exactly one PostGIS extension."
+
+migration_count="$(
+  operational_compose exec --no-TTY db \
+    psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+      --username "$operational_db_user" --dbname "$temporary_database" \
+      --command "SELECT count(*) FROM public.django_migrations;" \
+    2>/dev/null | tr -d '\r'
+)"
+[[ $migration_count =~ ^[0-9]+$ ]] && ((migration_count > 0)) \
+  || die "The restored database has no Django migration history."
+
+qfieldcloud_table_count="$(
+  operational_compose exec --no-TTY db \
+    psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+      --username "$operational_db_user" --dbname "$temporary_database" \
+      --command "SELECT count(*) FROM pg_class WHERE oid IN (to_regclass('public.django_migrations'), to_regclass('public.core_user'));" \
+    2>/dev/null | tr -d '\r'
+)"
+[[ $qfieldcloud_table_count == "2" ]] \
+  || die "The restored database is missing required QFieldCloud tables."
+
+operational_compose exec --no-TTY db \
+  psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+    --username "$operational_db_user" --dbname "$temporary_database" \
+    --command "SELECT postgis_full_version();" >/dev/null 2>&1 \
+  || die "The restored PostGIS extension did not pass its version query."
 
 failure_stage="isolated-object-storage-restore"
 docker run --detach \
