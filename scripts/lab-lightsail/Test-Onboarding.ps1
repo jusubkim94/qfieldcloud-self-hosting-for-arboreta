@@ -137,6 +137,16 @@ Assert-Contract (
 ) 'Relative AWS profile file overrides are not normalized before AWS CLI use.'
 
 $deployText = [string]$scriptTexts.Deploy
+$verifyText = [string]$scriptTexts.Verify
+Assert-Contract (
+    $verifyText.Contains('$fingerprintProperties = @(') -and
+    $verifyText.Contains('$fingerprintProperties.Count -ne 1')
+) 'The verifier can lose its single CloudFormation certificate fingerprint through PowerShell scalar unrolling.'
+Assert-Contract (
+    $verifyText.Contains('public static class QfcPinnedCertificateValidator') -and
+    $verifyText.Contains('[QfcPinnedCertificateValidator]::Create($HostName, $ExpectedCertificateSha256)') -and
+    -not $verifyText.Contains('ServerCertificateCustomValidationCallback = {')
+) 'The verifier must use a compiled TLS callback that does not require a PowerShell runspace on the HTTP worker thread.'
 Assert-Contract (
     $deployText.Contains("[string]`$ApprovedCommitSha = ''") -and
     $deployText.Contains("[string]`$ApprovedPlanSha256 = ''") -and

@@ -486,6 +486,7 @@ Resources:
           --repository-url "$repository_url" \
           --revision "$revision" \
           --install-root "$install_root" \
+          </dev/null \
           >"$bootstrap_log" 2>&1; then
           printf '%s\n' 'Bootstrap execution failed, exceeded its 80-minute work limit, or could not finish shutdown within 10 minutes; inspect /var/lib/qfieldcloud-bootstrap/bootstrap.log as root.' >&2
           exit 1

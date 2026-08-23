@@ -583,12 +583,14 @@ if ($PSCmdlet.ParameterSetName -eq 'Stack') {
     catch {
         throw 'CloudFormation bootstrap 검증 자료를 해석하지 못했습니다.'
     }
-    $fingerprintProperty = $validationData.PSObject.Properties |
-        Where-Object Name -EQ 'qfieldcloud-bootstrap'
-    if (-not $fingerprintProperty -or $fingerprintProperty.Count -ne 1) {
+    $fingerprintProperties = @(
+        $validationData.PSObject.Properties |
+            Where-Object Name -EQ 'qfieldcloud-bootstrap'
+    )
+    if ($fingerprintProperties.Count -ne 1) {
         throw 'CloudFormation 검증 자료에 인증서 지문이 하나로 들어 있지 않습니다.'
     }
-    $ExpectedCertificateSha256 = [string]$fingerprintProperty[0].Value
+    $ExpectedCertificateSha256 = [string]$fingerprintProperties[0].Value
 
     $stateResult = Invoke-AwsJson -Arguments @(
         'lightsail', 'get-instance-state', '--instance-name', [string]$outputs['InstanceName']
@@ -607,40 +609,59 @@ if ($ExpectedCertificateSha256 -notmatch '^[0-9a-f]{64}$') {
 $endpointUri = "https://$HostName/api/v1/status/"
 $probeNonce = [Guid]::NewGuid().ToString('N')
 $probeUri = "$endpointUri`?probe=$probeNonce"
-$handler = [System.Net.Http.HttpClientHandler]::new()
-$expectedFingerprint = $ExpectedCertificateSha256
-$expectedHostName = $HostName
-$handler.ServerCertificateCustomValidationCallback = {
-    param($requestMessage, $certificate, $chain, $sslPolicyErrors)
+if (-not ('QfcPinnedCertificateValidator' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
-    if ($null -eq $certificate) {
-        return $false
+public static class QfcPinnedCertificateValidator
+{
+    public static Func<HttpRequestMessage, X509Certificate2, X509Chain, SslPolicyErrors, bool>
+        Create(string expectedHostName, string expectedFingerprint)
+    {
+        return (request, certificate, chain, errors) =>
+        {
+            if (certificate == null)
+            {
+                return false;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            if (now < certificate.NotBefore.ToUniversalTime() ||
+                now >= certificate.NotAfter.ToUniversalTime())
+            {
+                return false;
+            }
+
+            string certificateDnsName = certificate.GetNameInfo(
+                X509NameType.DnsName,
+                false
+            );
+            if (!StringComparer.OrdinalIgnoreCase.Equals(certificateDnsName, expectedHostName))
+            {
+                return false;
+            }
+
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] actualBytes = sha256.ComputeHash(certificate.RawData);
+                string actualFingerprint = BitConverter.ToString(actualBytes)
+                    .Replace("-", "")
+                    .ToLowerInvariant();
+                return StringComparer.Ordinal.Equals(actualFingerprint, expectedFingerprint);
+            }
+        };
     }
-    $now = [DateTime]::UtcNow
-    if ($now -lt $certificate.NotBefore.ToUniversalTime() -or
-        $now -ge $certificate.NotAfter.ToUniversalTime()) {
-        return $false
-    }
-    $certificateDnsName = $certificate.GetNameInfo(
-        [System.Security.Cryptography.X509Certificates.X509NameType]::DnsName,
-        $false
-    )
-    if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
-        $certificateDnsName,
-        $expectedHostName
-    )) {
-        return $false
-    }
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $actualBytes = $sha256.ComputeHash($certificate.GetRawCertData())
-        $actualFingerprint = [System.BitConverter]::ToString($actualBytes).Replace('-', '').ToLowerInvariant()
-        return [System.StringComparer]::Ordinal.Equals($actualFingerprint, $expectedFingerprint)
-    }
-    finally {
-        $sha256.Dispose()
-    }
-}.GetNewClosure()
+}
+'@
+}
+
+$handler = [System.Net.Http.HttpClientHandler]::new()
+$handler.ServerCertificateCustomValidationCallback =
+    [QfcPinnedCertificateValidator]::Create($HostName, $ExpectedCertificateSha256)
 
 $client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(30)

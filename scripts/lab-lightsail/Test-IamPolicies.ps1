@@ -440,6 +440,9 @@ Assert-Contract (
     $userDataText.Contains('>"$bootstrap_log" 2>&1') -and
     $userDataText.Contains('chmod 0600 "$bootstrap_log"')
 ) '바깥 bootstrap 로그의 root 전용 0600 권한 계약이 사라졌습니다.'
+Assert-Contract (
+    $userDataText -match '(?m)--install-root "\$install_root" \\\r?\n\s*</dev/null \\\r?\n\s*>"\$bootstrap_log" 2>&1'
+) '표준입력으로 실행되는 launcher에서 bootstrap 자식 프로세스의 입력 격리가 사라졌습니다.'
 $expectedUserDataSubstitutions = @(
     'BootstrapPath'
     'BootstrapRevision'
