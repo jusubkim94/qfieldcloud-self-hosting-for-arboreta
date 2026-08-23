@@ -561,6 +561,7 @@ function Get-PinnedHttpsBytes {
 function Get-ReleaseManifestValue {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string[]]$Lines,
 
         [Parameter(Mandatory = $true)]

@@ -142,7 +142,11 @@ $deployAst = [System.Management.Automation.Language.Parser]::ParseInput(
     [ref]$deployTokens,
     [ref]$deployErrors
 )
-foreach ($functionName in @('Get-Sha256Hex', 'Get-ApprovalPlanSha256')) {
+foreach ($functionName in @(
+    'Get-Sha256Hex'
+    'Get-ApprovalPlanSha256'
+    'Get-ReleaseManifestValue'
+)) {
     $functionNodes = @(
         $deployAst.FindAll(
             {
@@ -156,6 +160,38 @@ foreach ($functionName in @('Get-Sha256Hex', 'Get-ApprovalPlanSha256')) {
     Assert-Contract ($functionNodes.Count -eq 1) "Deployer function count changed: $functionName"
     . ([scriptblock]::Create($functionNodes[0].Extent.Text))
 }
+$manifestCommit = 'c32bc110f8291b2a32e318528ee46689771630d6'
+$manifestDhparamsSha256 = 'a6e3c01dabf4fe5cb32b20e1f84e55a2aa4309159e102867a1ca8fa7e8acd991'
+$manifestLinesWithIntentionalBlanks = @(
+    '# Release provenance'
+    "QFIELDCLOUD_COMMIT=$manifestCommit"
+    ''
+    "QFIELDCLOUD_DHPARAM_SHA256=$manifestDhparamsSha256"
+    ''
+)
+Assert-Contract (
+    (Get-ReleaseManifestValue `
+        -Lines $manifestLinesWithIntentionalBlanks `
+        -Name QFIELDCLOUD_COMMIT) -ceq $manifestCommit
+) 'The deployer cannot read a release manifest that contains intentional blank lines.'
+Assert-Contract (
+    (Get-ReleaseManifestValue `
+        -Lines $manifestLinesWithIntentionalBlanks `
+        -Name QFIELDCLOUD_DHPARAM_SHA256) -ceq $manifestDhparamsSha256
+) 'The deployer cannot read the DH parameters pin when the manifest contains blank lines.'
+$actualManifestLines = @(
+    Get-Content -LiteralPath (Join-Path $repositoryRoot 'config\qfieldcloud-v26.25.env')
+)
+Assert-Contract (
+    (Get-ReleaseManifestValue `
+        -Lines $actualManifestLines `
+        -Name QFIELDCLOUD_COMMIT) -match '^[0-9a-f]{40}$'
+) 'The deployer cannot read the pinned commit from the checked-in release manifest.'
+Assert-Contract (
+    (Get-ReleaseManifestValue `
+        -Lines $actualManifestLines `
+        -Name QFIELDCLOUD_DHPARAM_SHA256) -match '^[0-9a-f]{64}$'
+) 'The deployer cannot read the DH parameters pin from the checked-in release manifest.'
 $sampleApprovalPlan = [ordered]@{
     ApprovalSchemaVersion = 1
     BootstrapRevision     = '0000000000000000000000000000000000000000'
