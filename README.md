@@ -10,9 +10,10 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 확인 기준일은 **2026-08-23**입니다.
 
 - `lab-lightsail` 파일럿의 CloudFormation 템플릿, 배포 전 확인 도구, Docker Compose, 설치·상태·worker 시험·백업·격리 복원시험 도구가 구현되어 있습니다.
+- 비루트 관리자가 배포 역할과 권한 상한선을 만들고, 별도의 설치자가 접근키 없이 1시간 역할 세션으로 설치하는 흐름을 구현했습니다. 템플릿 문법과 로컬 계약은 검증했지만 새 계정의 실제 역할 전환 종단 간 시험은 아직 완료하지 않았습니다.
 - QFieldCloud는 공식 릴리스 `v26.25`, Git commit(정확한 소스 저장 시점)과 `linux/amd64` 컨테이너 digest(이미지 내용 고유 식별자)로 고정합니다.
 - QGIS 3 worker만 허용합니다. 공식 `v26.25` QGIS 4 이미지의 내용이 기대와 달라 QGIS 4는 안전하게 실패하도록 비활성화했습니다.
-- **실제 AWS 최초 생성에서 Lightsail 시작 스크립트 실패를 재현하고 원인을 수정했지만, 수정안 재배포는 아직 검증하지 않았습니다.** 문서의 명령이 실제 AWS 설치 성공을 보장한다는 뜻이 아닙니다.
+- **실제 AWS에서 두 번의 생성 실패를 재현했고, 두 번째 원인을 공식 DH parameters checksum 오기입으로 확정해 수정했지만 최신 수정안 재배포는 아직 검증하지 않았습니다.** 문서의 명령이 실제 AWS 설치 성공을 보장한다는 뜻이 아닙니다.
 - `standard-aws`는 아직 Phase 1 설계 단계이며 실행 가능한 배포 도구가 없습니다.
 
 처음 설치를 검토한다면 [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md)를 먼저 읽으세요. 배포 명령은 기본적으로 계획만 확인하고, 사용자가 `-Execute`를 명시해야 자원을 만듭니다.
@@ -25,9 +26,9 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 | 서버 | Lightsail Linux 4GB RAM, 2 vCPU, 80GB SSD 한 대 |
 | 서버 안 구성 | QFieldCloud app·Nginx·worker, 전용 PostGIS, 로컬 S3 호환 저장소 |
 | 접속 | 고정 IPv4 기반 `IP.sslip.io`, 자체서명 TLS 인증서 |
-| 백업 | 자동 snapshot(디스크 시점 사본) 기본 사용, 애플리케이션 백업은 서버 로컬 디스크에 수동 생성 |
+| 백업 | 자동 snapshot 기본 사용, 최초 애플리케이션 백업·격리 복원시험은 설치 중 자동 실행, 이후 백업은 서버 로컬 디스크에 수동 생성 |
 | 삭제 보호 | 생성 시작부터 CloudFormation termination protection(삭제 방지) 활성화 |
-| 월 비용 추정 | 기본 약 **US$24**, 자동 snapshot 7개를 모두 80GB 완전 변경으로 계산한 보수적 상한 약 **US$52** |
+| 월 비용 추정 | 인스턴스만 약 **US$24** + 실제 자동 snapshot 저장량, snapshot 7개를 모두 80GB 완전 변경으로 계산한 보수적 상한 약 **US$52** |
 | 용도 | 학습·내부 시험·소규모 파일럿 |
 
 세금, 환율, 전송량 초과, 수동 snapshot과 사용자가 별도로 만든 자원은 포함하지 않습니다. 가격은 바뀔 수 있으므로 실행 직전에 [AWS Lightsail 가격표](https://aws.amazon.com/lightsail/pricing/)를 다시 확인해야 합니다.
@@ -41,6 +42,7 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 - QFieldCloud 시스템 DB와 기존 식물이력관리 DB는 서로 완전히 별개의 시스템입니다.
 - 비밀번호와 암호화 키는 인스턴스 안에서 생성하고 GitHub, CloudFormation 출력 또는 설치 로그에 넣지 않습니다.
 - AWS 루트 사용자와 장기 접근키를 설치 편의 수단으로 사용하지 않습니다. 기존 조직은 IAM Identity Center를, 단독 무료 계정은 콘솔 전용 IAM 사용자와 `aws login` 임시 브라우저 자격증명을 사용합니다.
+- 계정 관리자는 [배포 권한 준비](docs/access-bootstrap.md)에서 설치자 신뢰 주체를 등록합니다. 이후 별도 설치자는 고정된 최소 권한 역할의 **각 세션을 최대 1시간** 사용합니다. 원본 브라우저 로그인은 더 오래 유효할 수 있고 새 1시간 세션을 다시 받을 수 있으므로, 작업 후 원본 프로필에서도 로그아웃해야 합니다. 한 사람이 관리자 프로필을 그대로 재사용하는 간편 경로는 가능하지만 관리자 권한 자체가 사라지는 것은 아닙니다.
 - `latest`, `main` 같은 변동 참조로 운영 이미지를 바꾸지 않습니다. 업데이트는 백업·검토·명시적 버전 변경을 거치는 별도 작업입니다.
 - 비용이 발생하는 실제 AWS 시험은 사용자가 비용, 위험과 삭제 방법을 확인한 뒤에만 실행합니다.
 
@@ -61,7 +63,7 @@ flowchart LR
 
 | 항목 | `lab-lightsail` | `standard-aws` |
 |---|---|---|
-| 상태 | 파일럿 구현, 최초 AWS 실패 수정 후 재배포 전 | 설계 문서만 있음 |
+| 상태 | 파일럿 구현, 두 번째 AWS 실패 수정 후 최신 재배포 전 | 설계 문서만 있음 |
 | 목적 | 학습·내부 시험·소규모 검증 | 장기 운영·확장·다른 기관 배포 |
 | 컴퓨팅 | Lightsail 한 대 | EC2 한 대 이상 |
 | 시스템 DB | 같은 서버의 전용 PostgreSQL/PostGIS | 별도 RDS PostgreSQL/PostGIS |
@@ -75,6 +77,7 @@ flowchart LR
 | 문서 | 역할 |
 |---|---|
 | [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md) | 현재 구현의 계획, 설치, 확인, 백업, 복원시험과 삭제 |
+| [배포 권한 준비와 유지관리](docs/access-bootstrap.md) | 관리자 설정, 설치자 분리, 역할 기반 설치·갱신·제거 흐름 |
 | [아키텍처](docs/architecture.md) | 두 프로필의 구성과 데이터 경계 |
 | [비용](docs/costs.md) | Phase 1 비용 설계와 비용 증가 요인 |
 | [보안 모델](docs/security-model.md) | 인증정보, Docker socket과 네트워크 위험 |

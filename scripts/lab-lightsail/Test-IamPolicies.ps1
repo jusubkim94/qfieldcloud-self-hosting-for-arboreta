@@ -67,6 +67,27 @@ function Test-ExactSet {
     return @($difference).Count -eq 0
 }
 
+function Get-SingleQuotedArrayValues {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptText,
+
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[A-Za-z][A-Za-z0-9]+$')]
+        [string]$VariableName
+    )
+
+    $arrayMatch = [regex]::Match(
+        $ScriptText,
+        '(?s)\$' + [regex]::Escape($VariableName) + '\s*=\s*@\((?<Body>.*?)\)'
+    )
+    Assert-Contract $arrayMatch.Success "스크립트에서 $VariableName 배열을 찾지 못했습니다."
+    return @(
+        [regex]::Matches($arrayMatch.Groups['Body'].Value, "'(?<Value>[^']+)'") |
+            ForEach-Object { $_.Groups['Value'].Value }
+    )
+}
+
 function Test-PilotResourceTags {
     param(
         [Parameter(Mandatory = $true)]
@@ -362,5 +383,111 @@ Assert-Contract ($deployScriptText.Contains('function Get-PinnedHttpsBytes')) '�
 Assert-Contract ($deployScriptText.Contains('-Name QFIELDCLOUD_DHPARAM_SHA256')) '배포 스크립트가 DH parameters 고정값을 읽지 않습니다.'
 Assert-Contract ($deployScriptText.Contains("-Artifact upstream-dhparams")) '배포 스크립트가 공식 DH parameters를 배포 전에 확인하지 않습니다.'
 Assert-Contract ($deployScriptText.Contains("UpstreamDhparams               = 'official-commit-bytes-verified'")) '배포 계획에 공식 DH parameters 검증 결과가 없습니다.'
+
+$deploymentRoleArnPattern = '^arn:aws:iam::[0-9]{12}:role/qfieldcloud-lab/QFieldCloudLabDeployer$'
+$expectedDeploymentRoleProfileKeys = @(
+    'duration_seconds'
+    'region'
+    'role_arn'
+    'role_session_name'
+    'source_profile'
+)
+$expectedBlockedCredentialEnvironmentVariables = @(
+    'AWS_ACCESS_KEY_ID'
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN'
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE'
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI'
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
+    'AWS_ENDPOINT_URL'
+    'AWS_ENDPOINT_URL_CLOUDFORMATION'
+    'AWS_ENDPOINT_URL_LIGHTSAIL'
+    'AWS_ENDPOINT_URL_STS'
+    'AWS_ROLE_ARN'
+    'AWS_ROLE_SESSION_NAME'
+    'AWS_SECRET_ACCESS_KEY'
+    'AWS_SECURITY_TOKEN'
+    'AWS_SESSION_TOKEN'
+    'AWS_WEB_IDENTITY_TOKEN_FILE'
+)
+$roleAwareScripts = @(
+    [pscustomobject]@{ Name = '배포'; Text = $deployScriptText }
+    [pscustomobject]@{ Name = '검증'; Text = $testScriptText }
+)
+foreach ($roleAwareScript in $roleAwareScripts) {
+    $parseErrors = $null
+    $tokens = $null
+    $scriptAst = [System.Management.Automation.Language.Parser]::ParseInput(
+        $roleAwareScript.Text,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    Assert-Contract (@($parseErrors).Count -eq 0) "$($roleAwareScript.Name) 스크립트에 PowerShell 구문 오류가 있습니다."
+
+    $roleParameters = @(
+        $scriptAst.FindAll(
+            {
+                param($node)
+                $node -is [System.Management.Automation.Language.ParameterAst] -and
+                    $node.Name.VariablePath.UserPath -eq 'ExpectedDeploymentRoleArn'
+            },
+            $true
+        )
+    )
+    Assert-Contract ($roleParameters.Count -eq 1) "$($roleAwareScript.Name) 스크립트의 배포 역할 ARN 매개변수가 정확히 하나여야 합니다."
+    $rolePatternAttributes = @(
+        $roleParameters[0].Attributes | Where-Object {
+            $_.TypeName.FullName -eq 'ValidatePattern'
+        }
+    )
+    Assert-Contract ($rolePatternAttributes.Count -eq 1) "$($roleAwareScript.Name) 스크립트의 배포 역할 ARN 형식 검사가 정확히 하나여야 합니다."
+    Assert-Contract (
+        [string]$rolePatternAttributes[0].PositionalArguments[0].SafeGetValue() -ceq $deploymentRoleArnPattern
+    ) "$($roleAwareScript.Name) 스크립트의 배포 역할 ARN 경로가 고정되지 않았습니다."
+
+    $roleProfileKeys = Get-SingleQuotedArrayValues `
+        -ScriptText $roleAwareScript.Text `
+        -VariableName 'allowedDeploymentRoleProfileKeys'
+    Assert-Contract (
+        Test-ExactSet -Actual $roleProfileKeys -Expected $expectedDeploymentRoleProfileKeys
+    ) "$($roleAwareScript.Name) 스크립트의 AssumeRole 프로필 허용 키가 다릅니다."
+
+    $blockedEnvironmentVariables = Get-SingleQuotedArrayValues `
+        -ScriptText $roleAwareScript.Text `
+        -VariableName 'blockedCredentialEnvironmentVariables'
+    Assert-Contract (
+        Test-ExactSet `
+            -Actual $blockedEnvironmentVariables `
+            -Expected $expectedBlockedCredentialEnvironmentVariables
+    ) "$($roleAwareScript.Name) 스크립트가 차단하는 AWS 자격증명 환경변수 목록이 다릅니다."
+
+    foreach ($requiredFunction in @(
+        'Assert-NoCredentialEnvironmentOverride',
+        'Assert-NoStaticCredentialProfile',
+        'Get-AwsProfileFileSection',
+        'Get-DeploymentRoleProfileContract',
+        'Get-TemporaryBrowserSourceProfileContract'
+    )) {
+        $functionCount = @(
+            $scriptAst.FindAll(
+                {
+                    param($node)
+                    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                        $node.Name -eq $requiredFunction
+                },
+                $true
+            )
+        ).Count
+        Assert-Contract ($functionCount -eq 1) "$($roleAwareScript.Name) 스크립트의 $requiredFunction 함수가 정확히 하나여야 합니다."
+    }
+
+    Assert-Contract ($roleAwareScript.Text.Contains("-AllowedKeys @('login_session', 'output', 'region')")) "$($roleAwareScript.Name) 스크립트의 aws login 원본 프로필 허용 키가 고정되지 않았습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains("-AllowedKeys @('output', 'region', 'sso_account_id', 'sso_role_name', 'sso_session')")) "$($roleAwareScript.Name) 스크립트의 SSO 원본 프로필 허용 키가 고정되지 않았습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains("(Get-AwsResolvedCredentialType -ProfileName `$ProfileName) -ne 'login'")) "$($roleAwareScript.Name) 스크립트가 역할 원본 aws login 자격증명 유형을 확인하지 않습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains("(Get-AwsResolvedCredentialType -ProfileName `$ProfileName) -ne 'sso'")) "$($roleAwareScript.Name) 스크립트가 역할 원본 SSO 자격증명 유형을 확인하지 않습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains("(Get-AwsResolvedCredentialType -ProfileName `$Profile) -ne 'assume-role'")) "$($roleAwareScript.Name) 스크립트가 최종 AssumeRole 자격증명 유형을 확인하지 않습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains("[string]`$section.Values['duration_seconds'] -cne '3600'")) "$($roleAwareScript.Name) 스크립트의 AssumeRole 갱신 시간이 1시간으로 고정되지 않았습니다."
+    Assert-Contract ($roleAwareScript.Text.Contains('assumed-role/QFieldCloudLabDeployer/$($deploymentRoleContract.RoleSessionName)')) "$($roleAwareScript.Name) 스크립트가 최종 STS 호출자를 고정 역할과 세션 이름으로 확인하지 않습니다."
+    Assert-Contract (([regex]::Matches($roleAwareScript.Text, 'Assert-NoStaticCredentialProfile -ProfileName')).Count -ge 2) "$($roleAwareScript.Name) 스크립트가 역할 및 원본 프로필의 고정 자격증명을 모두 거부하지 않습니다."
+}
 
 Write-Host 'IAM 정책 정적 계약을 확인했습니다. AWS API는 호출하지 않았습니다.'

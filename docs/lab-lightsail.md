@@ -6,10 +6,11 @@
 
 확인 기준일은 **2026-08-23**입니다.
 
-- **완료:** 템플릿, PowerShell과 Bash 문법, 고정 버전, Docker Compose 구성 및 민감정보 노출 여부를 포함한 정적 검증. 실제 AWS에서 최초 자원 생성과 Lightsail launch script(시작 스크립트) 실패 원인 재현
-- **미완료:** 수정한 시작 스크립트의 실제 AWS 재배포, 실제 브라우저·QField 접속, 부하, 장애와 삭제 시험
+- **완료:** 템플릿, PowerShell과 Bash 문법, 고정 버전, Docker Compose 구성 및 민감정보 노출 여부를 포함한 정적 검증. 실제 AWS에서 두 번의 생성 실패를 재현했고, 두 번째 실패 원인을 잘못 고정한 공식 DH parameters checksum으로 확정하여 수정하고 배포 전 원본 바이트 검사를 추가함
+- **완료:** 비루트 관리자 권한 준비와 분리된 설치자의 1시간 배포 역할 흐름에 대한 로컬 계약 검사, 실제 AWS CloudFormation 템플릿 문법 검증
+- **미완료:** 최신 수정본의 실제 AWS 재배포, 새 계정에서 권한 준비부터 역할 전환까지의 종단 간 시험, 실제 브라우저·QField 접속, 부하, 장애와 삭제 시험
 
-따라서 현재 상태는 **“최초 AWS 생성 실패 원인 확인, 수정안 재배포 전”**입니다. 실제 AWS에서 실행하지 않은 기능을 성공했다고 보지 않습니다.
+따라서 현재 상태는 **“두 번째 AWS 생성 실패 원인까지 확인, 최신 수정안 재배포 전”**입니다. 실제 AWS에서 실행하지 않은 기능을 성공했다고 보지 않습니다.
 
 > [!NOTE]
 > `docs/runbooks/`는 자동화 구현 전에 작성한 Phase 1 설계 기준이라 “아직 도구가 없음” 또는 장래의 더 넓은 완료기준을 기록한 부분이 있습니다. 현재 구현된 `lab-lightsail`의 명령, 자동 완료 조건과 복원시험 범위는 이 문서를 우선합니다. Phase 1 실행서를 실제 명령서로 사용하지 마세요.
@@ -54,12 +55,12 @@ AWS snapshot은 실제로 변경된 저장 블록에 따라 더 작을 수 있�
 1. Git과 PowerShell 7
 2. [AWS CLI 버전 2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). Windows용 공식 MSI 설치 절차를 따르고, 인터넷 스크립트를 `curl | bash`처럼 즉시 실행하지 않음
 3. 브라우저에서 임시 자격증명을 받는 비루트 AWS 계정: 기존 조직의 IAM Identity Center 역할 또는 콘솔 전용 IAM 사용자
-4. 서울 리전에서 고정 파일럿 CloudFormation 스택과 Lightsail 자원을 조회·생성할 전용 권한. 삭제 권한은 평소 연결하지 않음
+4. [배포 권한 준비와 유지관리](access-bootstrap.md)로 만든 서울 리전·고정 파일럿 전용 배포 역할. 삭제 권한은 평소 연결하지 않음
 5. 공개 GitHub에 Push되어 누구나 내려받을 수 있는 정확한 설치 commit
 
-초기 배포 정책은 [서울 리전·고정 파일럿 전용 배포 정책](../infra/lab-lightsail/deployer-policy.json)에 있습니다. 이 정책은 스택 이름 `qfieldcloud-lab-pilot`, 다섯 CloudFormation 자원 형식과 파일럿에 필요한 작업만 허용합니다. 자원 생성·태그·방화벽·고정 IP·경보·삭제 같은 Lightsail 쓰기는 CloudFormation이 전달한 요청에서만 허용하고, 사용자의 직접 작업은 네 개의 고정 태그가 있는 파일럿 인스턴스의 시작·중지·재시작·브라우저 SSH로 한정합니다. Lightsail 콘솔이 브라우저 SSH 화면을 열 때 함께 조회하는 서울 리전의 디스크·키 쌍·인스턴스 스냅샷·로드밸런서 메타데이터는 같은 계정 전체를 볼 수 있습니다. 키 쌍 조회에는 개인키가 아니라 이름과 지문 같은 메타데이터만 포함됩니다. 전역 CDN 배포 조회 API는 버지니아 북부 리전에서만 동작하므로 `us-east-1`의 `GetDistributions` 한 가지 읽기만 별도로 허용하며 생성·변경·삭제 권한은 허용하지 않습니다. CloudFormation은 서울 밖에서 거부하고, Lightsail은 서울과 이 단일 콘솔 조회 예외 밖에서 거부하며 Lightsail 서비스 연결 역할 권한도 포함하지 않습니다. 권한 판정에 영향을 주지 않는 `Sid`는 필요한 문단에만 짧게 사용하고, 정적 테스트가 IAM 고객 관리형 정책의 6,144자 제한과 추가 유지보수 여유를 검사합니다. 스택 삭제와 삭제 방지 해제 권한은 평소 정책에서 제외하고 [삭제 전용 정책](../infra/lab-lightsail/cleanup-policy.json)으로 분리했습니다.
+초기 배포 정책은 [서울 리전·고정 파일럿 전용 배포 정책](../infra/lab-lightsail/deployer-policy.json)에 있습니다. 권장 구조는 [권한 준비 템플릿](../infra/lab-lightsail/access-bootstrap.yaml)이 이 정책을 고정 역할에 연결하고 같은 정책을 permissions boundary(권한 상한선)로도 적용하는 방식입니다. 이 정책은 스택 이름 `qfieldcloud-lab-pilot`, 다섯 CloudFormation 자원 형식과 파일럿에 필요한 작업만 허용합니다. 자원 생성·태그·방화벽·고정 IP·경보·삭제 같은 Lightsail 쓰기는 CloudFormation이 전달한 요청에서만 허용하고, 사용자의 직접 작업은 네 개의 고정 태그가 있는 파일럿 인스턴스의 시작·중지·재시작·브라우저 SSH로 한정합니다. Lightsail 콘솔이 브라우저 SSH 화면을 열 때 함께 조회하는 서울 리전의 디스크·키 쌍·인스턴스 스냅샷·로드밸런서 메타데이터는 같은 계정 전체를 볼 수 있습니다. 키 쌍 조회에는 개인키가 아니라 이름과 지문 같은 메타데이터만 포함됩니다. 전역 CDN 배포 조회 API는 버지니아 북부 리전에서만 동작하므로 `us-east-1`의 `GetDistributions` 한 가지 읽기만 별도로 허용하며 생성·변경·삭제 권한은 허용하지 않습니다. CloudFormation은 서울 밖에서 거부하고, Lightsail은 서울과 이 단일 콘솔 조회 예외 밖에서 거부하며 Lightsail 서비스 연결 역할 권한도 포함하지 않습니다. 권한 판정에 영향을 주지 않는 `Sid`는 필요한 문단에만 짧게 사용하고, 정적 테스트가 IAM 고객 관리형 정책의 6,144자 제한과 추가 유지보수 여유를 검사합니다. 스택 삭제와 삭제 방지 해제 권한은 평소 정책에서 제외하고 [삭제 전용 정책](../infra/lab-lightsail/cleanup-policy.json)으로 분리했습니다.
 
-AWS IAM은 `CreateStack`에 전달한 `TemplateBody`의 파일 checksum, Lightsail 자원 개수나 bundle 값을 검사할 조건을 제공하지 않습니다. 따라서 이 정책도 악의적으로 바꾼 CloudFormation 템플릿까지 막는 완전한 permission boundary(권한 상한선)는 아닙니다. 반드시 공개 GitHub에 Push된 검토 완료 commit에서 제공하는 배포 스크립트만 사용하고, 전용 사용자의 다른 정책은 `SignInLocalDevelopmentAccess`만 유지하세요. **AWS 루트 사용자로 배포하지 마세요.** 배포 도구는 루트와 장기 접근키 기반 IAM 사용자를 거부하고, IAM Identity Center 또는 `aws login`으로 받은 임시 브라우저 자격증명만 허용합니다.
+AWS IAM은 `CreateStack`에 전달한 `TemplateBody`의 파일 checksum, Lightsail 자원 개수나 bundle 값을 검사할 조건을 제공하지 않습니다. 따라서 이 정책도 악의적으로 바꾼 CloudFormation 템플릿까지 막는 완전한 방어는 아닙니다. 반드시 공개 GitHub에 Push된 검토 완료 commit의 설치 도구만 사용하고 배포 역할에 다른 AWS 권한을 추가하지 마세요. **AWS 루트 사용자로 배포하지 마세요.** 배포 도구는 루트와 장기 접근키 기반 IAM 사용자를 거부하고, IAM Identity Center 또는 `aws login`으로 받은 임시 브라우저 자격증명에서 고정 배포 역할을 맡는 경로를 권장합니다.
 
 ### 접근키를 만들지 않는 브라우저 로그인
 
@@ -67,28 +68,28 @@ AWS IAM은 `CreateStack`에 전달한 `TemplateBody`의 파일 checksum, Lightsa
 
 #### 이미 AWS Organizations와 IAM Identity Center가 있는 조직 계정
 
-계정 관리자가 알려 준 SSO 시작 URL, SSO 리전, 계정과 역할을 준비한 뒤 자신의 PC에서만 다음을 실행합니다. `qfc-lab`은 이 안내서에서 쓰는 예시 프로필 이름입니다.
+계정 관리자가 알려 준 SSO 시작 URL, SSO 리전, 계정과 설치자 permission set을 준비한 뒤 자신의 PC에서만 다음을 실행합니다. `qfc-installer`는 이 안내서의 권장 원본 프로필 이름입니다.
 
 ```powershell
-aws configure sso --profile qfc-lab
-aws sso login --profile qfc-lab
+aws configure sso --profile qfc-installer
+aws sso login --profile qfc-installer
 ```
 
-두 번째 명령이 기본 브라우저를 열면 자신의 AWS 계정에서 승인합니다. 터미널이나 브라우저에 표시된 코드, 계정 번호와 ARN도 채팅이나 GitHub 이슈에 붙여 넣지 않습니다. 로그인이 끝나면 이후 명령에 `-Profile qfc-lab`을 사용합니다.
+`aws configure sso`에서 `SSO region`에는 관리자가 알려 준 Identity Center 홈 리전을 입력하고, 별도 질문인 `CLI default client Region`에는 반드시 서울 `ap-northeast-2`를 입력합니다. 출력 형식은 `json` 또는 빈칸을 선택할 수 있습니다. 홈 리전과 배포 리전은 서로 다를 수 있습니다. 두 번째 명령이 기본 브라우저를 열면 자신의 AWS 계정에서 승인합니다. 터미널이나 브라우저에 표시된 코드, 계정 번호와 ARN도 채팅이나 GitHub 이슈에 붙여 넣지 않습니다. 로그인이 끝나면 역할 전환 설치의 `-SourceProfile qfc-installer`를 사용합니다.
 
-#### AWS Organizations가 없는 단독 계정 또는 무료 플랜 계정
+#### 기존 시험 계정의 직접 IAM 사용자 경로(신규 설치에는 권장하지 않음)
 
 IAM Identity Center 활성화 화면이 무료 플랜 종료나 크레딧 만료를 경고하면 **활성화를 취소**합니다. 단일 리전 선택은 KMS 비용만 피할 뿐, Organizations 생성에 따른 계정 플랜 영향까지 없애지는 않습니다.
 
-이 경우 루트 콘솔은 다음 비루트 사용자를 만드는 데만 한 번 사용합니다.
+다음 수동 절차는 이미 `qfc-lab-deployer`를 만든 기존 시험 계정의 호환 경로입니다. 신규 외부 사용자는 이 정책을 사용자에게 영구 연결하지 말고 다음 절의 역할 기반 권한 준비를 사용하세요.
 
 1. IAM → **Policies** → **Create policy** → **JSON**에서 `infra/lab-lightsail/deployer-policy.json` 내용을 붙여 넣고 `QFieldCloudLabDeployer`라는 고객 관리형 정책을 만듭니다.
 2. IAM → **Users** → **Create user**에서 `qfc-lab-deployer`를 만들고 콘솔 접근만 허용합니다. Access key는 만들지 않습니다.
 3. 사용자에게 방금 만든 `QFieldCloudLabDeployer`와 AWS 관리형 `SignInLocalDevelopmentAccess` 정책을 연결합니다.
 4. 사용자의 **Security credentials**에서 MFA(다중 인증)를 등록합니다.
-5. 루트 콘솔에서 로그아웃하고 IAM 사용자 전용 로그인 주소로 다시 로그인합니다.
+5. 관리자 콘솔에서 로그아웃하고 IAM 사용자 전용 로그인 주소로 다시 로그인합니다.
 
-정책 파일을 이미 만들었는데 저장소의 JSON이 바뀌었다면 다음 AWS 작업 전에 루트 콘솔에서 **IAM → Policies → QFieldCloudLabDeployer → Policy versions → Create version**으로 새 JSON 버전을 만들고 기본 버전으로 지정합니다. 기존 사용자 연결과 현재 임시 로그인은 그대로 유지되지만, 새 기본 버전이 적용되기 전에는 배포하지 않습니다.
+정책 파일을 이미 만들었는데 저장소의 JSON이 바뀌었다면 다음 AWS 작업 전에 비루트 관리자 콘솔에서 **IAM → Policies → QFieldCloudLabDeployer → Policy versions → Create version**으로 새 JSON 버전을 만들고 기본 버전으로 지정합니다. 기존 사용자 연결과 현재 임시 로그인은 그대로 유지되지만, 새 기본 버전이 적용되기 전에는 배포하지 않습니다.
 
 AWS CLI `2.32.0` 이상에서 다음 명령을 실행하고, 열린 브라우저에서 반드시 `qfc-lab-deployer` 콘솔 세션을 선택합니다. 루트 세션을 선택하지 않습니다.
 
@@ -101,6 +102,10 @@ if (-not $aws) {
 ```
 
 첫 줄에서 PATH(명령 검색 경로)에 등록된 AWS CLI를 찾고, 없으면 Windows 사용자별 기본 설치 경로를 사용합니다. AWS는 이 로그인으로 최대 12시간 동안 자동 갱신되는 임시 자격증명을 제공합니다. 작업을 마치면 `& $aws logout --profile qfc-lab`으로 종료합니다. 자세한 동작은 [AWS CLI 콘솔 자격증명 로그인 공식 문서](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)를 따릅니다.
+
+### 권장: 관리자와 설치자를 분리하고, 설치에는 1시간 배포 역할
+
+신규 설치는 [AWS 배포 권한 준비와 유지관리](access-bootstrap.md)를 먼저 수행합니다. 권한 준비 스택은 IAM 사용자·비밀번호·접근키를 만들지 않고, 고정 배포 역할과 정책 두 개만 만듭니다. 비루트 관리자가 별도 설치자를 신뢰하도록 준비하면 `Install-QFieldCloudPilot.ps1`이 설치자 브라우저 임시 로그인, 비밀값 없는 로컬 역할 프로필, 1시간 역할 전환과 배포 계획을 한 흐름으로 처리합니다. 한 사람이 관리자 프로필을 계속 쓰는 간편 경로는 가능하지만 원본 관리자 권한은 사라지지 않습니다.
 
 ## 2. 로컬 소스 확인
 
@@ -116,22 +121,25 @@ if (-not $aws) {
 
 ```powershell
 pwsh -NoProfile -File .\scripts\lab-lightsail\Test-IamPolicies.ps1
+pwsh -NoProfile -File .\scripts\lab-lightsail\Test-AccessBootstrap.ps1
+pwsh -NoProfile -File .\scripts\lab-lightsail\Test-Onboarding.ps1
 git remote get-url origin
 git status --short
 git log -1 --format=%H
 ```
 
-첫 명령은 AWS API를 호출하지 않고 배포·삭제 정책, 고정 스택 이름과 템플릿 자원 형식의 안전 계약을 검사합니다. `git status --short`는 아무것도 출력하지 않아야 합니다. 수정사항이 있거나 아직 Push하지 않은 작업이라면 배포하지 말고 정상적인 Pull Request 검토와 병합 절차를 먼저 끝냅니다.
+앞의 세 시험 명령은 AWS API를 호출하지 않고 배포·삭제 정책, 권한 준비, 역할 프로필, 고정 스택 이름과 템플릿 자원 형식의 안전 계약을 검사합니다. `git status --short`는 아무것도 출력하지 않아야 합니다. 수정사항이 있거나 아직 Push하지 않은 작업이라면 배포하지 말고 정상적인 Pull Request 검토와 병합 절차를 먼저 끝냅니다.
 
 ## 3. 먼저 계획만 확인하기
 
-다음 명령에는 `-Execute`가 없습니다. AWS에 로그인된 사용자와 서울 리전의 Lightsail 상품·가용 영역, 템플릿, 기존 스택, 공개 GitHub 파일을 **읽기 전용으로 확인**하지만 AWS 자원을 만들거나 바꾸지 않습니다.
+다음 명령에는 `-Execute`가 없습니다. 원본 프로필의 브라우저 로그인을 갱신하고 로컬 AWS config에 비밀값 없는 역할 프로필을 만들거나 복구할 수 있습니다. 그 뒤 AWS에서는 로그인 주체, 서울 리전의 Lightsail 상품·가용 영역, 템플릿, 기존 스택과 공개 GitHub 파일을 **읽기 전용으로 확인**하며 과금 자원을 만들거나 바꾸지 않습니다.
 
 `<12자리 계정 ID>`에는 AWS 콘솔 오른쪽 위 계정 메뉴에 표시되는 자신의 계정 ID를 입력합니다. 채팅이나 GitHub에는 붙여 넣지 않습니다. 도구는 이 값을 출력하지 않고, 선택한 프로필 및 실제 임시 세션의 계정과 모두 같은지만 확인합니다.
 
 ```powershell
-pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
-  -Profile qfc-lab `
+pwsh -NoProfile -File .\scripts\lab-lightsail\Install-QFieldCloudPilot.ps1 `
+  -SourceProfile qfc-installer `
+  -RoleProfile qfc-lab-role `
   -ExpectedAccountId '<12자리 계정 ID>'
 ```
 
@@ -139,7 +147,7 @@ pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
 
 - `Action`이 `plan-only`
 - `Region`이 `ap-northeast-2`
-- `PrincipalType`이 `temporary-console-login` 또는 `temporary-identity-center-role`
+- `PrincipalType`이 `temporary-assumed-deployment-role`
 - `AccountBinding`이 `expected-account-verified`
 - `ExistingStack`이 `False`
 - `ExistingInstanceName`, `ExistingStaticIpName`, `ExistingAlarmName`이 모두 `False`
@@ -151,6 +159,8 @@ pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
 - `CloudFormationResourceTypes`에 WaitCondition 두 형식과 Lightsail Instance·StaticIp·Alarm만 있음
 - `ExistingArboretumDatabaseScope`가 `not-accessed`
 - `BootstrapRevision`이 검토해 Push한 commit과 같음
+- `ApprovalPlanSha256`이 64자리이며, 도구가 마지막에 표시한 `QFC_APPROVAL_RECEIPT_V1`의 첫 값과 같음
+- `UpstreamDhparams`가 `official-commit-bytes-verified`
 
 기존 스택 또는 세 Lightsail 이름 항목 중 하나라도 `True`이면 중단하세요. 이 도구는 기존 데이터가 있는 인스턴스를 뜻하지 않게 교체하거나 기존 고정 IP·알람을 임의로 채택하지 않습니다.
 
@@ -159,13 +169,14 @@ pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
 아래 명령은 **실제로 AWS 자원을 만들고 즉시 과금을 시작할 수 있습니다.** 계획의 계정, 리전, 월 비용, 단일 서버 위험과 마지막 삭제 절차를 사용자가 검토하고 승인한 경우에만 `-Execute`를 추가합니다.
 
 ```powershell
-pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
-  -Profile qfc-lab `
+pwsh -NoProfile -File .\scripts\lab-lightsail\Install-QFieldCloudPilot.ps1 `
+  -SourceProfile qfc-installer `
+  -RoleProfile qfc-lab-role `
   -ExpectedAccountId '<12자리 계정 ID>' `
   -Execute
 ```
 
-기본값은 서울 `ap-northeast-2a`, 자동 snapshot과 경보 활성화, 브라우저 SSH만 허용입니다. 설치 과정은 Docker, 고정 이미지, QFieldCloud 전용 DB 구조, 좌표 변환 격자(PROJ-data), 자체서명 인증서와 로컬 관리자를 준비한 뒤 작은 시험 프로젝트로 QGIS 3 worker(백그라운드 작업)를 자동 검증합니다.
+첫 계획과 확인 문구 사이에 Git commit, 계정, 가격, 옵션 또는 기존 자원 상태가 바뀌면 승인 SHA-256이 달라져 생성 전에 중단합니다. 기본값은 서울 `ap-northeast-2a`, 자동 snapshot과 경보 활성화, 브라우저 SSH만 허용입니다. 설치 과정은 Docker, 고정 이미지, QFieldCloud 전용 DB 구조, 좌표 변환 격자(PROJ-data), 자체서명 인증서와 로컬 관리자를 준비한 뒤 작은 시험 프로젝트로 QGIS 3 worker(백그라운드 작업)를 자동 검증합니다.
 
 Lightsail은 시작 스크립트를 root 권한의 명령 목록으로 실행합니다. 이번 파일럿에서 실제 생성된 Ubuntu 인스턴스에는 앞에 `/bin/sh` 래퍼가 추가된 것도 확인했습니다. 따라서 템플릿은 내부 Bash shebang(실행기 지정 줄)에 의존하지 않고, POSIX `sh`로 파일 권한 기본값과 명령 검색 경로를 먼저 고정한 다음 첫 본 작업으로 Bash를 명시 실행해 나머지 본문을 전달합니다. 이 순서는 정적 회귀 테스트로 고정되어 있습니다. [AWS Lightsail 시작 스크립트 공식 예제](https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-configure-server-additional-data-shell-script.html)도 shebang 대신 root로 실행할 명령을 입력하는 방식을 안내합니다.
 
@@ -197,8 +208,10 @@ worker 시험 뒤에는 최초 root(서버 최고관리자) 전용 로컬 백업
 
 관리자 비밀번호를 입력하기 전에 인증서 fingerprint(지문)를 다른 경로로 비교합니다.
 
-1. AWS 콘솔에서 Lightsail → **Instances** → `qfieldcloud-lab-pilot` → **Connect using SSH**를 엽니다. 이 브라우저 SSH 방식은 [AWS 공식 안내](https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-connect-to-your-instance-virtual-private-server.html)를 따릅니다.
-2. 서버 터미널에서 다음 명령을 실행합니다.
+1. 설치자 콘솔 세션의 오른쪽 위 사용자 메뉴에서 **Switch role**을 선택합니다. 다중 세션 화면이면 **Add session → Switch role**을 선택합니다.
+2. **Account**에는 자신의 12자리 계정 ID, **Role**에는 경로를 포함한 `qfieldcloud-lab/QFieldCloudLabDeployer`를 입력하고 **Switch Role**을 누릅니다. 루트 사용자는 역할 전환을 할 수 없습니다.
+3. 오른쪽 위 표시가 전환한 역할인지 확인한 뒤 Lightsail → **Instances** → `qfieldcloud-lab-pilot` → **Connect using SSH**를 엽니다. 역할 경로 입력 방식은 [AWS 역할 전환 공식 안내](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-console.html), 브라우저 SSH는 [Lightsail 공식 안내](https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-connect-to-your-instance-virtual-private-server.html)를 따릅니다.
+4. 서버 터미널에서 다음 명령을 실행합니다.
 
    ```bash
    sudo openssl x509 \
@@ -206,10 +219,10 @@ worker 시험 뒤에는 최초 root(서버 최고관리자) 전용 로컬 백업
      -noout -subject -dates -fingerprint -sha256
    ```
 
-3. 자신의 브라우저에서 파일럿 URL의 인증서 세부정보를 열고 SHA-256 fingerprint와 호스트 이름을 비교합니다.
-4. 값이 정확히 같을 때만 파일럿 경고를 일시적으로 허용합니다. 다르면 로그인하지 말고 중단합니다.
+5. 자신의 브라우저에서 파일럿 URL의 인증서 세부정보를 열고 SHA-256 fingerprint와 호스트 이름을 비교합니다.
+6. 값이 정확히 같을 때만 파일럿 경고를 일시적으로 허용합니다. 다르면 로그인하지 말고 중단합니다.
 
-브라우저 SSH가 호스트 키 불일치로 **Reset record**를 요구하는 예외 상황에서는 `qfc-lab-deployer`가 해당 기록을 지울 권한을 일부러 갖지 않습니다. 먼저 인스턴스 이름과 생성 시각이 파일럿과 일치하는지 확인하고, IAM 관리자에게 [AWS 공식 호스트 키 복구 절차](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-troubleshooting-browser-based-ssh-rdp-client-connection.html)를 요청합니다. 편의를 위해 배포 사용자에 광범위한 Lightsail 권한을 추가하지 않습니다.
+브라우저 SSH가 호스트 키 불일치로 **Reset record**를 요구하는 예외 상황에서는 권장 배포 역할과 기존 호환 사용자 `qfc-lab-deployer` 모두 해당 기록을 지울 권한을 일부러 갖지 않습니다. 먼저 인스턴스 이름과 생성 시각이 파일럿과 일치하는지 확인하고, IAM 관리자에게 [AWS 공식 호스트 키 복구 절차](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-troubleshooting-browser-based-ssh-rdp-client-connection.html)를 요청합니다. 편의를 위해 배포 주체에 광범위한 Lightsail 권한을 추가하지 않습니다.
 
 로컬 상태 도구는 자체서명 인증서를 무조건 허용하지 않습니다. 스택의 인증된 완료 신호에 담긴 SHA-256 fingerprint와 서버 인증서가 정확히 같을 때만 연결합니다. 사람이 직접 비교할 때도 값이 다르면 중단하세요. 민감하거나 실제 업무용 데이터를 이 공개 파일럿에 넣지 마세요.
 
@@ -220,14 +233,17 @@ worker 시험 뒤에는 최초 root(서버 최고관리자) 전용 로컬 백업
 다음 명령은 스택이 `CREATE_COMPLETE`인지 확인하고, 설치 완료 신호에서 인증서 SHA-256 fingerprint를 가져와 실제 서버 인증서와 비교합니다. 이어서 Lightsail 실행 상태와 외부 HTTPS 상태 주소의 DB·객체 저장소 상태를 확인합니다.
 
 ```powershell
+$accountId = '<12자리 계정 ID>'
+$expectedRoleArn = "arn:aws:iam::$accountId`:role/qfieldcloud-lab/QFieldCloudLabDeployer"
 $expectedRevision = (git rev-parse HEAD).Trim()
 $expectedBootstrapSha256 = (Get-FileHash `
   -Algorithm SHA256 `
   -LiteralPath .\scripts\lab-lightsail\bootstrap.sh).Hash.ToLowerInvariant()
 pwsh -NoProfile -File .\scripts\lab-lightsail\Test-QFieldCloudPilot.ps1 `
   -StackName qfieldcloud-lab-pilot `
-  -Profile qfc-lab `
-  -ExpectedAccountId '<12자리 계정 ID>' `
+  -Profile qfc-lab-role `
+  -ExpectedAccountId $accountId `
+  -ExpectedDeploymentRoleArn $expectedRoleArn `
   -ExpectedBootstrapRevision $expectedRevision `
   -ExpectedBootstrapSha256 $expectedBootstrapSha256
 ```
@@ -350,16 +366,21 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 
 ### CloudFormation 스택 삭제
 
-1. 삭제를 승인한 뒤에만 루트 또는 IAM 관리자가 IAM → **Policies** → **Create policy** → **JSON**에서 `infra/lab-lightsail/cleanup-policy.json` 내용을 붙여 넣고 `QFieldCloudLabCleanup` 정책을 만듭니다.
-2. `QFieldCloudLabCleanup`을 `qfc-lab-deployer`에 임시로 연결합니다. 기존 `QFieldCloudLabDeployer` 정책도 CloudFormation의 실제 자원 정리에 필요하므로 삭제가 끝날 때까지 유지합니다.
-3. 루트 콘솔에서 로그아웃하고 `qfc-lab-deployer`로 [AWS Management Console](https://console.aws.amazon.com/)에 다시 로그인합니다.
-4. 오른쪽 위 리전을 **Asia Pacific (Seoul) / `ap-northeast-2`**로 바꿉니다.
-5. CloudFormation → **Stacks** → `qfieldcloud-lab-pilot`을 선택합니다. 현재 파일럿 정책과 스크립트는 안전 범위를 고정하기 위해 이 이름만 허용합니다.
-6. **Resources** 탭에서 기본 인스턴스 `qfieldcloud-lab-pilot`, 고정 IP `qfieldcloud-lab-pilot-ip`, 선택적 경보가 이 스택 소유인지 확인합니다.
-7. **Stack actions → Edit termination protection → Disable → Save**를 선택합니다. 성공·실패 모두 생성 요청 때 보호가 켜지므로, 이 보호 해제는 위의 백업·격리 복원시험과 삭제 승인이 모두 끝난 경우에만 합니다. 스택 정보에서 이미 `Disabled`임이 확인될 때만 이 단계를 건너뜁니다.
-8. **Delete**를 누르고 대상 스택 이름을 다시 읽은 뒤 승인합니다. 삭제 시작 후에는 중지할 수 없습니다.
-9. 상태가 `DELETE_COMPLETE`가 될 때까지 기다립니다. 공식 화면 순서는 [CloudFormation 삭제 방지 안내](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-protect-stacks.html)와 [스택 삭제 안내](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-delete-stack.html)에 있습니다.
-10. 루트 또는 IAM 관리자 세션에서 `qfc-lab-deployer`와 `QFieldCloudLabCleanup`의 연결을 즉시 해제합니다. 다시 쓸 이유가 없다면 연결되지 않은 cleanup 정책도 삭제합니다.
+권장 역할 기반 설치의 `QFieldCloudLabDeployer`는 permissions boundary가 삭제 권한도 막으므로 cleanup 정책을 그 역할에 추가해도 삭제할 수 없습니다.
+
+**권장 역할 경로:** 삭제 승인을 받은 뒤 비루트 계정 관리자로 로그인합니다. 관리자 자신이 정확한 고정 스택의 삭제를 수행하므로 배포 역할에 정책을 추가하지 않습니다. 루트로 일상 삭제를 수행하지 않습니다.
+
+**기존 직접 IAM 사용자 호환 경로:** 비루트 관리자가 IAM → **Policies → Create policy → JSON**에서 `infra/lab-lightsail/cleanup-policy.json`으로 `QFieldCloudLabCleanup`을 만들고 기존 `qfc-lab-deployer`에 임시 연결합니다. 기존 `QFieldCloudLabDeployer`도 실제 자원 정리에 필요하므로 삭제 완료까지 유지합니다. 관리자는 로그아웃하고 해당 사용자로 다시 로그인합니다.
+
+선택한 삭제 주체로 다음 공통 절차를 수행합니다.
+
+1. 오른쪽 위 리전을 **Asia Pacific (Seoul) / `ap-northeast-2`**로 바꿉니다.
+2. CloudFormation → **Stacks** → `qfieldcloud-lab-pilot`을 선택합니다. 현재 파일럿 정책과 스크립트는 안전 범위를 고정하기 위해 이 이름만 허용합니다.
+3. **Resources** 탭에서 기본 인스턴스 `qfieldcloud-lab-pilot`, 고정 IP `qfieldcloud-lab-pilot-ip`, 선택적 경보가 이 스택 소유인지 확인합니다.
+4. **Stack actions → Edit termination protection → Disable → Save**를 선택합니다. 성공·실패 모두 생성 요청 때 보호가 켜지므로, 이 보호 해제는 위의 백업·격리 복원시험과 삭제 승인이 모두 끝난 경우에만 합니다. 스택 정보에서 이미 `Disabled`임이 확인될 때만 이 단계를 건너뜁니다.
+5. **Delete**를 누르고 대상 스택 이름을 다시 읽은 뒤 승인합니다. 삭제 시작 후에는 중지할 수 없습니다.
+6. 상태가 `DELETE_COMPLETE`가 될 때까지 기다립니다. 공식 화면 순서는 [CloudFormation 삭제 방지 안내](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-protect-stacks.html)와 [스택 삭제 안내](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-delete-stack.html)에 있습니다.
+7. 기존 직접 IAM 사용자 경로였다면 비루트 관리자 세션에서 `qfc-lab-deployer`와 `QFieldCloudLabCleanup`의 연결을 즉시 해제합니다. 다시 쓸 이유가 없다면 연결되지 않은 cleanup 정책도 삭제합니다. 권장 관리자 경로는 임시 정책을 만들지 않았으므로 관리자 세션에서 로그아웃합니다.
 
 `DELETE_FAILED`이면 강제 삭제부터 누르지 마세요. **Events**와 **Resources**에서 남은 물리 자원을 기록합니다. 강제 삭제나 `retain`은 자원을 계정에 남길 수 있으며 그 자원은 계속 과금될 수 있습니다. 원인을 해결한 뒤 일반 삭제를 다시 시도하고, 정말 보존할 자원만 이름과 월 비용을 기록해 남깁니다.
 
@@ -367,7 +388,7 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 
 스택이 사라진 뒤 같은 서울 리전에서 다음을 하나씩 확인합니다.
 
-- CloudFormation의 삭제된 스택 필터: `DELETE_COMPLETE`, `DELETE_SKIPPED`나 실패 자원 없음
+- CloudFormation의 삭제된 스택 필터: 스택은 `DELETE_COMPLETE`; **Resources**에는 `DELETE_FAILED` 없음. `DELETE_SKIPPED`가 있으면 retain된 물리 자원으로 따로 기록하고 비용 확인
 - Lightsail **Instances**: 기본 `qfieldcloud-lab-pilot` 없음
 - Lightsail **Networking**: `qfieldcloud-lab-pilot-ip` 고정 IP 없음
 - Lightsail **Snapshots**: 보존하기로 한 수동·복사 snapshot만 있음; 불필요한 snapshot은 명시적으로 삭제
