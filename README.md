@@ -12,7 +12,7 @@ AWS(Amazon Web Services)를 처음 사용하는 사람도 검토 가능한 방�
 - `lab-lightsail` 파일럿의 CloudFormation 템플릿, 배포 전 확인 도구, Docker Compose, 설치·상태·worker 시험·백업·격리 복원시험 도구가 구현되어 있습니다.
 - QFieldCloud는 공식 릴리스 `v26.25`, Git commit(정확한 소스 저장 시점)과 `linux/amd64` 컨테이너 digest(이미지 내용 고유 식별자)로 고정합니다.
 - QGIS 3 worker만 허용합니다. 공식 `v26.25` QGIS 4 이미지의 내용이 기대와 달라 QGIS 4는 안전하게 실패하도록 비활성화했습니다.
-- **정적 검증은 완료했지만, 실제 AWS 배포는 아직 검증하지 않았습니다.** 문서의 명령이 실제 AWS 설치 성공을 보장한다는 뜻이 아닙니다.
+- **실제 AWS 최초 생성에서 Lightsail 시작 스크립트 실패를 재현하고 원인을 수정했지만, 수정안 재배포는 아직 검증하지 않았습니다.** 문서의 명령이 실제 AWS 설치 성공을 보장한다는 뜻이 아닙니다.
 - `standard-aws`는 아직 Phase 1 설계 단계이며 실행 가능한 배포 도구가 없습니다.
 
 처음 설치를 검토한다면 [lab-lightsail 파일럿 안내서](docs/lab-lightsail.md)를 먼저 읽으세요. 배포 명령은 기본적으로 계획만 확인하고, 사용자가 `-Execute`를 명시해야 자원을 만듭니다.
@@ -61,7 +61,7 @@ flowchart LR
 
 | 항목 | `lab-lightsail` | `standard-aws` |
 |---|---|---|
-| 상태 | 파일럿 구현, 실제 AWS 미검증 | 설계 문서만 있음 |
+| 상태 | 파일럿 구현, 최초 AWS 실패 수정 후 재배포 전 | 설계 문서만 있음 |
 | 목적 | 학습·내부 시험·소규모 검증 | 장기 운영·확장·다른 기관 배포 |
 | 컴퓨팅 | Lightsail 한 대 | EC2 한 대 이상 |
 | 시스템 DB | 같은 서버의 전용 PostgreSQL/PostGIS | 별도 RDS PostgreSQL/PostGIS |

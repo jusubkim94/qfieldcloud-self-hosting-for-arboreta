@@ -6,10 +6,10 @@
 
 확인 기준일은 **2026-08-23**입니다.
 
-- **완료:** 템플릿, PowerShell과 Bash 문법, 고정 버전, Docker Compose 구성 및 민감정보 노출 여부를 포함한 정적 검증
-- **미완료:** 실제 AWS 계정에서의 생성, 실제 브라우저·QField 접속, 부하, 장애와 삭제 시험
+- **완료:** 템플릿, PowerShell과 Bash 문법, 고정 버전, Docker Compose 구성 및 민감정보 노출 여부를 포함한 정적 검증. 실제 AWS에서 최초 자원 생성과 Lightsail launch script(시작 스크립트) 실패 원인 재현
+- **미완료:** 수정한 시작 스크립트의 실제 AWS 재배포, 실제 브라우저·QField 접속, 부하, 장애와 삭제 시험
 
-따라서 현재 상태는 **“정적 검증 완료, 실제 AWS 배포 미검증”**입니다. 실제 AWS에서 실행하지 않은 기능을 성공했다고 보지 않습니다.
+따라서 현재 상태는 **“최초 AWS 생성 실패 원인 확인, 수정안 재배포 전”**입니다. 실제 AWS에서 실행하지 않은 기능을 성공했다고 보지 않습니다.
 
 > [!NOTE]
 > `docs/runbooks/`는 자동화 구현 전에 작성한 Phase 1 설계 기준이라 “아직 도구가 없음” 또는 장래의 더 넓은 완료기준을 기록한 부분이 있습니다. 현재 구현된 `lab-lightsail`의 명령, 자동 완료 조건과 복원시험 범위는 이 문서를 우선합니다. Phase 1 실행서를 실제 명령서로 사용하지 마세요.
@@ -166,6 +166,8 @@ pwsh -NoProfile -File .\scripts\lab-lightsail\Deploy-QFieldCloudPilot.ps1 `
 ```
 
 기본값은 서울 `ap-northeast-2a`, 자동 snapshot과 경보 활성화, 브라우저 SSH만 허용입니다. 설치 과정은 Docker, 고정 이미지, QFieldCloud 전용 DB 구조, 좌표 변환 격자(PROJ-data), 자체서명 인증서와 로컬 관리자를 준비한 뒤 작은 시험 프로젝트로 QGIS 3 worker(백그라운드 작업)를 자동 검증합니다.
+
+Lightsail은 시작 스크립트를 root 권한의 명령 목록으로 실행합니다. 이번 파일럿에서 실제 생성된 Ubuntu 인스턴스에는 앞에 `/bin/sh` 래퍼가 추가된 것도 확인했습니다. 따라서 템플릿은 내부 Bash shebang(실행기 지정 줄)에 의존하지 않고, POSIX `sh`로 파일 권한 기본값과 명령 검색 경로를 먼저 고정한 다음 첫 본 작업으로 Bash를 명시 실행해 나머지 본문을 전달합니다. 이 순서는 정적 회귀 테스트로 고정되어 있습니다. [AWS Lightsail 시작 스크립트 공식 예제](https://docs.aws.amazon.com/lightsail/latest/userguide/lightsail-how-to-configure-server-additional-data-shell-script.html)도 shebang 대신 root로 실행할 명령을 입력하는 방식을 안내합니다.
 
 자동 worker smoke test(최소 기능 시험)는 프로젝트 생성, QGIS 3 처리, 패키지 생성과 임시 worker 컨테이너 정리를 확인합니다. 시험에는 관리자 비밀번호나 기존 로그인 세션을 사용하지 않습니다. 서버 내부에서 이 시험 전용 1시간 토큰을 만들고, 완료 전에 정확히 그 토큰만 폐기합니다. 성공하려면 `installer-worker-smoke` 시험 프로젝트와 그 작업, 임시 worker 컨테이너와 시험 토큰이 모두 정리되어야 합니다.
 

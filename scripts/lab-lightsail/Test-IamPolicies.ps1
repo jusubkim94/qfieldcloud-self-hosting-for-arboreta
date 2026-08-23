@@ -269,6 +269,77 @@ $templateResourceTypes = @(
 )
 Assert-Contract (Test-ExactSet -Actual $templateResourceTypes -Expected $allowedResourceTypes) '템플릿 자원 형식과 정책 allowlist가 다릅니다.'
 
+$userDataMatch = [regex]::Match(
+    $templateText,
+    '(?ms)^      UserData: !Sub \|\r?\n(?<Body>.*?)(?=^  StaticIp:\s*$)'
+)
+Assert-Contract $userDataMatch.Success 'Lightsail UserData 블록을 찾지 못했습니다.'
+$userDataLines = @(
+    $userDataMatch.Groups['Body'].Value.TrimEnd("`r", "`n") -split '\r?\n' |
+        ForEach-Object {
+            if ($_ -eq '') {
+                return ''
+            }
+            Assert-Contract ($_.StartsWith('        ')) 'Lightsail UserData 들여쓰기가 일관되지 않습니다.'
+            return $_.Substring(8)
+        }
+)
+Assert-Contract ($userDataLines.Count -gt 3) 'Lightsail UserData 본문이 비어 있습니다.'
+Assert-Contract ($userDataLines[0] -ceq '#!/bin/sh') 'Lightsail UserData의 이식 가능한 외부 셸 선언이 없습니다.'
+$userDataCommands = @(
+    $userDataLines | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') }
+)
+Assert-Contract ($userDataCommands[0] -ceq 'umask 077') 'Lightsail 외부 셸이 파일 권한 기본값을 먼저 제한하지 않습니다.'
+Assert-Contract ($userDataCommands[1] -ceq "PATH='/usr/sbin:/usr/bin:/sbin:/bin'") 'Lightsail 외부 셸의 명령 검색 경로가 고정되지 않았습니다.'
+Assert-Contract ($userDataCommands[2] -ceq 'export PATH') 'Lightsail 외부 셸의 고정 명령 검색 경로를 Bash에 전달하지 않습니다.'
+Assert-Contract ($userDataCommands[3] -ceq "exec /usr/bin/env bash -s -- <<'QFC_LIGHTSAIL_BASH_V1'") 'Lightsail 래퍼가 Bash로 명시적으로 전환하지 않습니다.'
+$bashHandoffLine = [array]::IndexOf($userDataLines, "exec /usr/bin/env bash -s -- <<'QFC_LIGHTSAIL_BASH_V1'")
+Assert-Contract ($bashHandoffLine -ge 0) 'Lightsail Bash 전환 위치를 찾지 못했습니다.'
+Assert-Contract ($userDataLines[$bashHandoffLine + 1] -ceq '#!/usr/bin/env bash') '전달되는 Bash 본문에 실행기 정보가 없습니다.'
+Assert-Contract ($userDataLines[$bashHandoffLine + 2] -ceq 'set -Eeuo pipefail') 'Bash 안전 옵션이 명시적 Bash 전환 바로 뒤에 있지 않습니다.'
+Assert-Contract ($userDataLines[-2] -ceq 'QFC_LIGHTSAIL_BASH_V1') 'Lightsail Bash heredoc 종료 표식이 UserData 끝에 없습니다.'
+Assert-Contract ($userDataLines[-1] -ceq 'exit 127') 'Lightsail Bash 실행 실패를 성공으로 오인할 수 있습니다.'
+Assert-Contract ((@($userDataLines | Where-Object { $_ -eq 'QFC_LIGHTSAIL_BASH_V1' })).Count -eq 1) 'Lightsail Bash heredoc 종료 표식은 정확히 하나여야 합니다.'
+Assert-Contract (([regex]::Matches($userDataMatch.Groups['Body'].Value, 'QFC_LIGHTSAIL_BASH_V1')).Count -eq 2) 'Lightsail Bash heredoc 이름은 시작과 종료에만 있어야 합니다.'
+Assert-Contract (([regex]::Matches($userDataMatch.Groups['Body'].Value, 'QFC_WAIT_HANDLE_V1')).Count -eq 2) 'WaitHandle heredoc 이름은 시작과 종료에만 있어야 합니다.'
+$waitHandleReadLine = [array]::IndexOf($userDataLines, "IFS= read -r wait_handle <<'QFC_WAIT_HANDLE_V1'")
+Assert-Contract ($waitHandleReadLine -gt 0) 'WaitHandle을 읽는 quoted heredoc 블록을 찾지 못했습니다.'
+Assert-Contract ($userDataLines[$waitHandleReadLine + 1] -ceq '${BootstrapWaitHandle}') 'WaitHandle 치환값이 quoted heredoc의 단독 데이터 줄에 있지 않습니다.'
+Assert-Contract ($userDataLines[$waitHandleReadLine + 2] -ceq 'QFC_WAIT_HANDLE_V1') 'WaitHandle quoted heredoc 종료 표식 위치가 다릅니다.'
+Assert-Contract ($userDataLines[$waitHandleReadLine + 3] -ceq 'readonly wait_handle') '읽은 WaitHandle 변수를 즉시 읽기 전용으로 만들지 않습니다.'
+Assert-Contract (([regex]::Matches($userDataMatch.Groups['Body'].Value, '\$\{BootstrapWaitHandle\}')).Count -eq 1) 'WaitHandle 치환값은 보호된 데이터 줄에 정확히 한 번만 있어야 합니다.'
+$disableTraceLine = [array]::IndexOf($userDataLines, 'set +x')
+Assert-Contract ($disableTraceLine -ge 0 -and $disableTraceLine -lt $waitHandleReadLine) 'WaitHandle을 읽기 전에 Bash 실행 추적을 명시적으로 꺼야 합니다.'
+Assert-Contract (-not (@($userDataLines[0..$waitHandleReadLine] | Where-Object { $_ -ceq 'set -x' }))) 'WaitHandle을 읽기 전에 Bash 실행 추적을 다시 켜면 안 됩니다.'
+$onExitStart = [array]::IndexOf($userDataLines, 'on_exit() {')
+$onExitEnd = if ($onExitStart -ge 0) {
+    [array]::IndexOf($userDataLines, '}', $onExitStart)
+}
+else {
+    -1
+}
+Assert-Contract ($onExitStart -ge 0 -and $onExitEnd -gt $onExitStart) 'Lightsail 실패 trap 함수를 찾지 못했습니다.'
+$onExitLines = @($userDataLines[$onExitStart..$onExitEnd])
+Assert-Contract ($onExitLines[1] -ceq '  rc=$?') 'Lightsail 실패 trap이 원래 종료코드를 먼저 보존하지 않습니다.'
+Assert-Contract ($onExitLines[2] -ceq '  trap - EXIT') 'Lightsail 실패 trap의 재귀 실행을 막지 않습니다.'
+Assert-Contract ($onExitLines[3] -ceq '  set +e') 'Lightsail 실패 정리 작업이 원래 종료코드를 가릴 수 있습니다.'
+Assert-Contract ($onExitLines -contains '       [ ! -L "$state_dir" ] &&') 'Lightsail 실패 상태 디렉터리의 symlink 쓰기를 거부하지 않습니다.'
+Assert-Contract ($onExitLines[-2] -ceq '  exit "$rc"') 'Lightsail 실패 trap이 원래 종료코드로 끝나지 않습니다.'
+$expectedUserDataSubstitutions = @(
+    'BootstrapPath'
+    'BootstrapRevision'
+    'BootstrapSha256'
+    'BootstrapWaitHandle'
+    'RepositoryName'
+    'RepositoryOwner'
+)
+$actualUserDataSubstitutions = @(
+    [regex]::Matches($userDataMatch.Groups['Body'].Value, '\$\{(?<Name>[^}]+)\}') |
+        ForEach-Object { $_.Groups['Name'].Value } |
+        Sort-Object -Unique
+)
+Assert-Contract (Test-ExactSet -Actual $actualUserDataSubstitutions -Expected $expectedUserDataSubstitutions) 'Lightsail UserData의 CloudFormation 치환 변수 allowlist가 다릅니다.'
+
 $deployScriptText = Get-Content -Raw -LiteralPath $deployScriptPath
 $testScriptText = Get-Content -Raw -LiteralPath $testScriptPath
 $deployResourceTypesMatch = [regex]::Match(

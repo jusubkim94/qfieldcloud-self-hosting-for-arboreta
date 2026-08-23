@@ -296,6 +296,14 @@ Resources:
         - Key: CloudFormationStack
           Value: !Ref 'AWS::StackName'
       UserData: !Sub |
+        #!/bin/sh
+        # Lightsail prepends its own /bin/sh launch wrapper, so an inner Bash
+        # shebang is only a comment. Replace that wrapper explicitly and feed
+        # the verified bootstrap launcher to Bash on standard input.
+        umask 077
+        PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+        export PATH
+        exec /usr/bin/env bash -s -- <<'QFC_LIGHTSAIL_BASH_V1'
         #!/usr/bin/env bash
         set -Eeuo pipefail
         set +x
@@ -311,7 +319,10 @@ Resources:
         readonly bootstrap_log="$state_dir/bootstrap.log"
         readonly bootstrap_timeout_seconds='4800'
         readonly certificate_fingerprint_file="$install_root/state/certificate-sha256"
-        readonly wait_handle='${BootstrapWaitHandle}'
+        IFS= read -r wait_handle <<'QFC_WAIT_HANDLE_V1'
+        ${BootstrapWaitHandle}
+        QFC_WAIT_HANDLE_V1
+        readonly wait_handle
         download_path=''
 
         signal_bootstrap() {
@@ -353,14 +364,21 @@ Resources:
 
         on_exit() {
           rc=$?
+          trap - EXIT
+          set +e
           if [ -n "$download_path" ]; then
-            rm -f -- "$download_path"
+            rm -f -- "$download_path" >/dev/null 2>&1 || true
           fi
           if [ "$rc" -ne 0 ]; then
-            rm -f -- "$state_dir/SUCCESS"
-            touch "$state_dir/FAILED"
-            chmod 0600 "$state_dir/FAILED"
-            printf '%s\n' 'QFieldCloud bootstrap failed; inspect the root-only local log.' >&2
+            if command -v install >/dev/null 2>&1 &&
+               [ ! -L "$state_dir" ] &&
+               install -d -m 0700 "$state_dir" >/dev/null 2>&1; then
+              rm -f -- "$state_dir/SUCCESS" "$state_dir/FAILED" >/dev/null 2>&1 || true
+              if : >"$state_dir/FAILED"; then
+                chmod 0600 "$state_dir/FAILED" >/dev/null 2>&1 || true
+              fi
+            fi
+            printf '%s\n' 'QFieldCloud bootstrap failed; inspect the root-only local log.' >&2 || true
             signal_bootstrap 'FAILURE' 'Verified bootstrap or validation failed.' 'failed' || true
           fi
           exit "$rc"
@@ -451,6 +469,8 @@ Resources:
         signal_bootstrap 'SUCCESS' 'Verified bootstrap and validation passed.' "$certificate_sha256"
         trap - EXIT
         printf '%s\n' 'Verified QFieldCloud bootstrap completed.'
+        QFC_LIGHTSAIL_BASH_V1
+        exit 127
 
   StaticIp:
     Type: AWS::Lightsail::StaticIp
