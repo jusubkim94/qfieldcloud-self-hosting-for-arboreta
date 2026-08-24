@@ -35,14 +35,17 @@ $script:repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $templateText = Get-RepositoryText 'infra/lab-lightsail/template.yaml'
 $bootstrapText = Get-RepositoryText 'scripts/lab-lightsail/bootstrap.sh'
 $healthText = Get-RepositoryText 'scripts/lab-lightsail/health-check.sh'
+$workerSmokeText = Get-RepositoryText 'scripts/lab-lightsail/worker-smoke-test.sh'
 $renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
 $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
-$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
-$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/manifest.json'
-$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/SHA256SUMS'
-$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
+$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/template.yaml'
+$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/manifest.json'
+$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/SHA256SUMS'
+$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
+$legacyReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
+$legacyReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
 
 $removedPaths = @(
     'infra/lab-lightsail/access-bootstrap.yaml'
@@ -151,6 +154,33 @@ Assert-Contract (
     $bootstrapText.Contains('The complete service and worker validation gate failed.') -and
     $healthText.Contains('[[ $worker_validation == "passed" ]]')
 ) 'Bootstrap no longer gates completion on service and worker validation.'
+
+$workerCleanupBlock = [regex]::Match(
+    $workerSmokeText,
+    '(?ms)^cleanup\(\) \{(?<Body>.*?)(?=^\})'
+)
+Assert-Contract (
+    $workerCleanupBlock.Success -and
+    $workerSmokeText.Contains('preserve_worker_failure_diagnostics()') -and
+    $workerSmokeText.Contains('/var/lib/qfieldcloud-bootstrap') -and
+    $workerSmokeText.Contains('compose-app-worker.log') -and
+    $workerSmokeText.Contains('qgis-container-state.txt') -and
+    $workerSmokeText.Contains('kernel-oom.log') -and
+    $workerSmokeText.Contains('Worker failure summary:') -and
+    $workerSmokeText.Contains('Redact project names, URLs, addresses, email, and tokens before sharing these files.') -and
+    $workerCleanupBlock.Groups['Body'].Value.Contains('preserve_worker_failure_diagnostics') -and
+    $workerCleanupBlock.Groups['Body'].Value.Contains('cleanup_owned_smoke_project') -and
+    $workerCleanupBlock.Groups['Body'].Value.IndexOf('preserve_worker_failure_diagnostics', [StringComparison]::Ordinal) -lt
+        $workerCleanupBlock.Groups['Body'].Value.IndexOf('cleanup_owned_smoke_project', [StringComparison]::Ordinal)
+) 'Worker failure diagnostics are not captured root-only before smoke-project cleanup.'
+
+Assert-Contract (
+    $templateText.Contains("template cannot set CloudFormation's stack failure behavior") -and
+    $readmeText.Contains('Preserve successfully provisioned resources') -and
+    $readmeText.Contains('YAML 속성이 아니라 CloudFormation의 스택 생성 실행 옵션') -and
+    -not $templateText.Contains('OnFailure:') -and
+    -not $templateText.Contains('DisableRollback:')
+) 'The template or documentation misrepresents the create-stack failure-preservation option.'
 
 Assert-Contract (
     $renewText.Contains('CERTBOT_EXPECTED_VERSION') -and
@@ -272,14 +302,14 @@ finally {
     $releaseArchive.Dispose()
 }
 Assert-Contract (
-    $releaseManifest.release_version -eq 'v0.1.0' -and
-    $releaseManifest.source_revision -eq '094c0662364ab96d6523bd1a2fbdf7e012d16948' -and
+    $releaseManifest.release_version -eq 'v0.1.1' -and
+    $releaseManifest.source_revision -eq '14fec1d0984023cc634b73c067959d2695777ed5' -and
     $releaseManifest.template.sha256 -eq $releaseTemplateHash -and
-    $releaseTemplateHash -eq '506c2c77bcd0c50907c28777151a7256f5541b45c4d66ec7cee0a5164e4fc539' -and
+    $releaseTemplateHash -eq '33b36470d8a5b31aa4d634d9ecf8ca9804d238b03568feb4ebf11849f91e5b2b' -and
     $releaseChecksums.Contains("$releaseTemplateHash  template.yaml") -and
-    $releaseArchiveHash -eq 'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22' -and
-    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.0.zip")
-) 'The committed v0.1.0 release manifest or checksum does not match template.yaml.'
+    $releaseArchiveHash -eq '5620adf6e304172750ab10c7cee8b98b82965f8ea3efa99fb815256b7dad657c' -and
+    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.1.zip")
+) 'The committed v0.1.1 release manifest or checksum does not match template.yaml.'
 Assert-Contract (
     -not $releaseTemplateText.Contains($zeroRevision) -and
     -not $releaseTemplateText.Contains($zeroChecksum) -and
@@ -288,12 +318,19 @@ Assert-Contract (
     $releaseTemplateText.Contains($releaseManifest.bootstrap.sha256)
 ) 'The downloadable release template still has placeholders or does not match its manifest.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/e7b77390a0822415a96bc496aa841be352e5f3fa/releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
+Assert-Contract (
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $legacyReleaseTemplatePath).Hash.ToLowerInvariant() -eq
+        '506c2c77bcd0c50907c28777151a7256f5541b45c4d66ec7cee0a5164e4fc539' -and
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $legacyReleaseArchivePath).Hash.ToLowerInvariant() -eq
+        'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22'
+) 'The immutable v0.1.0 release files changed unexpectedly.'
+
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/c7e8b02d26e385d705fd6506c6946f1c58da4bae/releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
     $readmeText.Contains('```mermaid') -and
-    $readmeText.Contains('수동 파일 업로드 방식으로 실제 새 AWS 스택을 만들고 삭제하는 종단 간 시험은 아직 수행하지 않았습니다.') -and
+    $readmeText.Contains('create_project` worker 검증이 실패하여 스택이 롤백되었습니다.') -and
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
 

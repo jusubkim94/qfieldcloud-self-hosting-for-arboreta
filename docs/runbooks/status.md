@@ -2,7 +2,7 @@
 
 상태 확인의 기준은 CloudFormation 완료 상태와 템플릿이 제공하는 Outputs입니다. 웹 페이지가 열린다는 사실만으로 전체 설치 성공으로 판정하지 않습니다.
 
-> 완성 템플릿은 다운로드할 수 있지만 이 수동 업로드 상태 확인 흐름은 실제 AWS에서 아직 검증하지 않았습니다.
+> 2026-08-24 실제 수동 업로드에서 `BootstrapWaitCondition`과 worker 검증 실패 상태는 확인했습니다. `CREATE_COMPLETE` 이후의 성공 상태 확인 흐름은 아직 실제 AWS에서 검증하지 못했습니다.
 
 ## 1. CloudFormation에서 확인
 

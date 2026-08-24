@@ -7,10 +7,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$releaseExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
-$releaseChecksumsPath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/SHA256SUMS'
-$expectedReleaseHash = '2163cdbd58ab8cc14e39a263a3b8830c8d975c1a7c4c2b7eada6d8184f59d33f'
-$editorDownloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/0d23bbcbbcb421f840b39029727583cdbbae41de/releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
+$releaseExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.1/QFieldCloudTemplateEditor-v0.1.1.exe'
+$releaseChecksumsPath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.1/SHA256SUMS'
+$expectedReleaseHash = 'd4acbcb0fc5f096652f0795154b55853f8af800c8f690b093b100058121e01a8'
+$editorDownloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/c7e8b02d26e385d705fd6506c6946f1c58da4bae/releases/tools/qfieldcloud-template-editor/v0.1.1/QFieldCloudTemplateEditor-v0.1.1.exe'
+$legacyExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
 foreach ($releasePath in @($releaseExecutablePath, $releaseChecksumsPath)) {
     if (-not (Test-Path -LiteralPath $releasePath -PathType Leaf)) {
         throw "Missing editor release file: $releasePath"
@@ -19,11 +20,15 @@ foreach ($releasePath in @($releaseExecutablePath, $releaseChecksumsPath)) {
 $releaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseExecutablePath).Hash.ToLowerInvariant()
 $releaseChecksums = Get-Content -Raw -LiteralPath $releaseChecksumsPath
 if ($releaseHash -ne $expectedReleaseHash -or
-    -not $releaseChecksums.Contains("$releaseHash  QFieldCloudTemplateEditor-v0.1.0.exe")) {
+    -not $releaseChecksums.Contains("$releaseHash  QFieldCloudTemplateEditor-v0.1.1.exe")) {
     throw 'The committed editor EXE does not match its reviewed SHA-256.'
 }
-if ((Get-Item -LiteralPath $releaseExecutablePath).VersionInfo.FileVersion -ne '0.1.0.0') {
+if ((Get-Item -LiteralPath $releaseExecutablePath).VersionInfo.FileVersion -ne '0.1.1.0') {
     throw 'The committed editor EXE has an unexpected file version.'
+}
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $legacyExecutablePath).Hash.ToLowerInvariant() -ne
+    '2163cdbd58ab8cc14e39a263a3b8830c8d975c1a7c4c2b7eada6d8184f59d33f') {
+    throw 'The immutable v0.1.0 editor EXE changed unexpectedly.'
 }
 $mainReadme = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'README.md')
 if (-not $mainReadme.Contains($editorDownloadUrl) -or
@@ -35,7 +40,7 @@ if (-not $mainReadme.Contains($editorDownloadUrl) -or
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("qfc-template-editor-test-" + [guid]::NewGuid().ToString('N'))
 try {
     & (Join-Path $PSScriptRoot 'Build-QFieldCloudTemplateEditor.ps1') -OutputDirectory $temporaryRoot
-    $executablePath = Join-Path $temporaryRoot 'QFieldCloudTemplateEditor-v0.1.0.exe'
+    $executablePath = Join-Path $temporaryRoot 'QFieldCloudTemplateEditor-v0.1.1.exe'
     if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
         throw 'The editor executable was not created.'
     }
@@ -51,6 +56,7 @@ try {
         'DrawArchitecture'
         'DrawInstallation'
         '고급 편집은 모든 내용을 바꿀 수 있지만'
+        'Preserve successfully provisioned resources를 직접 선택합니다.'
     )) {
         if (-not $sourceText.Contains($requiredText)) {
             throw "Missing editor contract text: $requiredText"
