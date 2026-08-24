@@ -14,7 +14,7 @@
 
 1. README의 초록색 **QFieldCloud 설치 파일 다운로드** 버튼을 다시 누릅니다.
 2. GitHub 로그인이나 브라우저 다운로드 차단 알림이 있는지 확인합니다.
-3. 계속 실패하면 [`releases/lab-lightsail/v0.1.0/template.yaml`](../releases/lab-lightsail/v0.1.0/template.yaml)을 열고 오른쪽 위 다운로드 버튼을 누릅니다.
+3. 계속 실패하면 [`releases/lab-lightsail/v0.1.1/template.yaml`](../releases/lab-lightsail/v0.1.1/template.yaml)을 열고 오른쪽 위 다운로드 버튼을 누릅니다.
 4. 파일 이름이 `template.yaml`이고 빈 파일이 아닌지 확인합니다.
 
 `infra/lab-lightsail/template.yaml`은 자리표시자가 있는 원본 틀이므로 업로드하지 않습니다.

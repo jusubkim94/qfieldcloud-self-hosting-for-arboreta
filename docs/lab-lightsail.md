@@ -25,8 +25,8 @@ flowchart LR
 
 ## 배포 파일과 원본 틀
 
-- 사용자가 올리는 완성본: [`releases/lab-lightsail/v0.1.0/template.yaml`](../releases/lab-lightsail/v0.1.0/template.yaml)
-- 완성본 정보와 해시: [`manifest.json`](../releases/lab-lightsail/v0.1.0/manifest.json), [`SHA256SUMS`](../releases/lab-lightsail/v0.1.0/SHA256SUMS)
+- 사용자가 올리는 완성본: [`releases/lab-lightsail/v0.1.1/template.yaml`](../releases/lab-lightsail/v0.1.1/template.yaml)
+- 완성본 정보와 해시: [`manifest.json`](../releases/lab-lightsail/v0.1.1/manifest.json), [`SHA256SUMS`](../releases/lab-lightsail/v0.1.1/SHA256SUMS)
 - 개발자가 관리하는 원본 틀: [`infra/lab-lightsail/template.yaml`](../infra/lab-lightsail/template.yaml)
 
 원본 틀의 자리표시자는 릴리스 생성 도구가 검토된 Git commit과 `bootstrap.sh` SHA-256으로 교체합니다. 따라서 사용자는 원본 틀이 아니라 완성본만 업로드해야 합니다.
