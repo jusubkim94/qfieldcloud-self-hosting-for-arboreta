@@ -186,9 +186,13 @@ Assert-Contract (
     $renewText.Contains('CERTBOT_EXPECTED_VERSION') -and
     $renewText.Contains('--preferred-profile "$LETSENCRYPT_CERTIFICATE_PROFILE"') -and
     $renewText.Contains('--ip-address "$public_host"') -and
+    $renewText.Contains('validation_log="$certbot_log_root/last-validation.log"') -and
+    $renewText.Contains('readonly validation_attempt_limit=5') -and
+    $renewText.Contains('Nginx did not serve the renewed certificate within 60 seconds.') -and
+    $renewText.Contains('Nginx served the renewed certificate, but trusted HTTPS validation failed within 60 seconds.') -and
     $bootstrapText.Contains('systemctl enable --now qfieldcloud-certificate-renew.timer') -and
     $composeText.Contains('image: "${CERTBOT_IMAGE:?required}"')
-) 'Pinned HTTPS certificate issuance or renewal wiring is missing.'
+) 'Pinned HTTPS issuance, renewal, bounded activation retry, or diagnostics are missing.'
 
 $imageLines = @(
     $versionText -split "`r?`n" |

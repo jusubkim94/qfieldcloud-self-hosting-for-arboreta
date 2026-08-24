@@ -32,7 +32,7 @@ if [[ ! $install_root =~ ^/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$ ]] || \
 fi
 
 for required_command in awk chmod cmp curl date docker flock install ln mktemp mv openssl \
-  readlink realpath rm sha256sum stat timeout; do
+  readlink realpath rm sha256sum sleep stat timeout; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Required certificate command is unavailable: $required_command" >&2
     exit 1
@@ -54,7 +54,9 @@ certbot_log_root="$state_root/certbot-log"
 certbot_live_root="$certbot_root/live/qfieldcloud-ip"
 failure_marker="$state_root/last-certificate-renewal-failure"
 command_log="$certbot_log_root/last-command.log"
+validation_log="$certbot_log_root/last-validation.log"
 candidate_dir=""
+validation_log_tmp=""
 operation_succeeded="false"
 
 write_state_value() {
@@ -76,12 +78,48 @@ write_state_value() {
   fi
 }
 
+write_validation_log() {
+  local validation_status="$1"
+  local validation_attempt="$2"
+  local validation_attempt_limit="$3"
+  local expected_fingerprint="$4"
+  local observed_fingerprint="$5"
+  local openssl_exit="$6"
+  local fingerprint_exit="$7"
+  local curl_exit="$8"
+  local curl_error="$9"
+
+  validation_log_tmp="$(mktemp "$certbot_log_root/.last-validation.XXXXXX")"
+  if ! printf '%s\n' \
+      "timestamp=$(date -u +%FT%TZ)" \
+      "mode=$mode" \
+      "status=$validation_status" \
+      "attempt=$validation_attempt" \
+      "attempt_limit=$validation_attempt_limit" \
+      "expected_fingerprint=$expected_fingerprint" \
+      "observed_fingerprint=$observed_fingerprint" \
+      "openssl_exit=$openssl_exit" \
+      "fingerprint_exit=$fingerprint_exit" \
+      "curl_exit=$curl_exit" \
+      "curl_error=$curl_error" >"$validation_log_tmp" \
+    || ! chmod 0600 "$validation_log_tmp" \
+    || ! mv -f -- "$validation_log_tmp" "$validation_log"; then
+    rm -f -- "$validation_log_tmp"
+    validation_log_tmp=""
+    return 1
+  fi
+  validation_log_tmp=""
+}
+
 on_exit() {
   local exit_code=$?
   trap - EXIT
   set +e
   if [[ -n $candidate_dir && $candidate_dir == "$release_root/.candidate."* ]]; then
     rm -rf -- "$candidate_dir"
+  fi
+  if [[ -n $validation_log_tmp && $validation_log_tmp == "$certbot_log_root/.last-validation."* ]]; then
+    rm -f -- "$validation_log_tmp"
   fi
   if [[ $operation_succeeded != "true" ]]; then
     write_state_value last-certificate-renewal-failure \
@@ -498,25 +536,94 @@ if [[ $current_changed == "true" ]] && \
   fail_after_promotion "Nginx could not reload the renewed certificate."
 fi
 
+readonly validation_attempt_limit=5
+readonly validation_retry_delay_seconds=5
+validation_succeeded="false"
 live_certificate_output=""
-if ! live_certificate_output="$(
-  timeout --signal=TERM --kill-after=5s 20s \
-    openssl s_client -connect 127.0.0.1:443 -servername "$public_host" </dev/null 2>/dev/null
-)"; then
-  fail_after_promotion "The live HTTPS certificate could not be retrieved."
-fi
-live_fingerprint=""
-if ! live_fingerprint="$(
-    openssl x509 -outform DER 2>/dev/null <<<"$live_certificate_output" \
-      | sha256sum | awk '{print $1}'
-  )" || [[ ! $live_fingerprint =~ ^[0-9a-f]{64}$ ]]; then
-  fail_after_promotion "The live HTTPS certificate fingerprint could not be calculated."
-fi
-if [[ $live_fingerprint != "$candidate_fingerprint" ]] || \
-  ! curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
-    --connect-to "$public_host:443:127.0.0.1:443" \
-    "https://$public_host/" >/dev/null 2>&1; then
-  fail_after_promotion "The live HTTPS endpoint did not serve the trusted renewed certificate."
+live_fingerprint="unavailable"
+openssl_exit="not-run"
+fingerprint_exit="not-run"
+curl_exit="not-run"
+trusted_https_error="not-run"
+for ((validation_attempt = 1; validation_attempt <= validation_attempt_limit; validation_attempt++)); do
+  live_certificate_output=""
+  live_fingerprint="unavailable"
+  openssl_exit=0
+  fingerprint_exit="not-run"
+  curl_exit="not-run"
+  trusted_https_error="not-run"
+
+  if live_certificate_output="$(
+      timeout --signal=TERM --kill-after=2s 4s \
+        openssl s_client -connect 127.0.0.1:443 -servername "$public_host" \
+          </dev/null 2>/dev/null
+    )"; then
+    openssl_exit=0
+  else
+    openssl_exit=$?
+  fi
+
+  if [[ $openssl_exit -eq 0 ]]; then
+    if live_fingerprint="$(
+        openssl x509 -outform DER 2>/dev/null <<<"$live_certificate_output" \
+          | sha256sum | awk '{print $1}'
+      )"; then
+      fingerprint_exit=0
+    else
+      fingerprint_exit=$?
+      live_fingerprint="unavailable"
+    fi
+    if [[ ! $live_fingerprint =~ ^[0-9a-f]{64}$ ]]; then
+      live_fingerprint="unavailable"
+      [[ $fingerprint_exit != "0" ]] || fingerprint_exit=1
+    fi
+  fi
+
+  if [[ $live_fingerprint == "$candidate_fingerprint" ]]; then
+    if trusted_https_error="$(
+        curl --fail --silent --show-error --output /dev/null \
+          --connect-timeout 2 --max-time 4 \
+          --connect-to "$public_host:443:127.0.0.1:443" \
+          "https://$public_host/" 2>&1
+      )"; then
+      curl_exit=0
+      trusted_https_error="none"
+    else
+      curl_exit=$?
+      trusted_https_error="${trusted_https_error//$'\r'/ }"
+      trusted_https_error="${trusted_https_error//$'\n'/ }"
+      trusted_https_error="${trusted_https_error:0:1000}"
+      [[ -n $trusted_https_error ]] || trusted_https_error="no-error-text"
+    fi
+  fi
+
+  validation_status="retrying"
+  if [[ $live_fingerprint == "$candidate_fingerprint" && $curl_exit == "0" ]]; then
+    validation_status="succeeded"
+    validation_succeeded="true"
+  elif ((validation_attempt == validation_attempt_limit)); then
+    validation_status="failed"
+  fi
+  if ! write_validation_log "$validation_status" "$validation_attempt" \
+      "$validation_attempt_limit" "$candidate_fingerprint" "$live_fingerprint" \
+      "$openssl_exit" "$fingerprint_exit" "$curl_exit" "$trusted_https_error"; then
+    fail_after_promotion \
+      "The certificate validation result could not be stored safely."
+  fi
+
+  [[ $validation_succeeded == "true" ]] && break
+  if ((validation_attempt < validation_attempt_limit)); then
+    sleep "$validation_retry_delay_seconds"
+  fi
+done
+
+if [[ $validation_succeeded != "true" ]]; then
+  if [[ $live_fingerprint != "$candidate_fingerprint" ]]; then
+    fail_after_promotion \
+      "Nginx did not serve the renewed certificate within 60 seconds. Review the root-only certificate validation log."
+  fi
+  fail_after_promotion \
+    "Nginx served the renewed certificate, but trusted HTTPS validation failed within 60 seconds. Review the root-only certificate validation log."
 fi
 
 now_utc="$(date -u +%FT%TZ)"

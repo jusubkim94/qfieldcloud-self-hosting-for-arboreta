@@ -76,6 +76,8 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 | 공인 인증서 갱신 실패 | `certificate_renewal`, 마지막 확인 시각, timer 상태 | 유효한 이전 인증서나 실패 표식 삭제 |
 | 공인 인증서인데 주소 불일치 | 접속 IP와 인증서 IP SAN, CA chain | 인증서 검증 비활성화 |
 
+설치기는 공인 인증서를 Nginx에 적용한 뒤 최대 60초 동안 새 인증서 지문과 신뢰된 HTTPS 응답을 다시 확인합니다. 각 시도의 마지막 결과는 root만 읽을 수 있는 `/opt/qfieldcloud/state/certbot-log/last-validation.log`에 저장합니다. `status`, `expected_fingerprint`, `observed_fingerprint`, `openssl_exit`, `curl_exit`을 확인하면 새 인증서 전환 지연과 TLS 신뢰 오류를 구분할 수 있습니다. 이 파일에는 개인키를 기록하지 않지만, 공유하기 전 공개 IP 등 운영 식별정보를 가립니다.
+
 공인 인증서 최초 발급과 시간 경과 자동 갱신은 실제 AWS에서 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
 
 ## 데이터베이스, 저장소 또는 worker 오류
