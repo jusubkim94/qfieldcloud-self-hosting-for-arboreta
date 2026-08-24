@@ -272,7 +272,7 @@ Assert-Contract (
     $releaseTemplateText.Contains($releaseManifest.bootstrap.sha256)
 ) 'The downloadable release template still has placeholders or does not match its manifest.'
 
-$downloadUrl = 'https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/raw/refs/heads/main/releases/lab-lightsail/v0.1.0/template.yaml'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/bda378da4c8829bb23196258f9ea3f6a17248ed1/releases/lab-lightsail/v0.1.0/template.yaml'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and

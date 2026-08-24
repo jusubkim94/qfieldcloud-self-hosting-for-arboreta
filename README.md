@@ -2,7 +2,7 @@
 
 > 이 저장소는 QField 또는 QFieldCloud 공식 프로젝트가 아닌 독립적인 비공식 배포 자동화 프로젝트입니다.
 
-[![QFieldCloud 설치 파일 다운로드](https://img.shields.io/badge/QFieldCloud_%EC%84%A4%EC%B9%98_%ED%8C%8C%EC%9D%BC-v0.1.0_%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C-2ea44f?style=for-the-badge)](https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/raw/refs/heads/main/releases/lab-lightsail/v0.1.0/template.yaml)
+[![QFieldCloud 설치 파일 다운로드](https://img.shields.io/badge/QFieldCloud_%EC%84%A4%EC%B9%98_%ED%8C%8C%EC%9D%BC-v0.1.0_%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C-2ea44f?style=for-the-badge)](https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/bda378da4c8829bb23196258f9ea3f6a17248ed1/releases/lab-lightsail/v0.1.0/template.yaml)
 
 위 버튼으로 완성된 `template.yaml`을 내려받은 뒤 AWS CloudFormation 화면에 올리면 됩니다. Git, PowerShell, AWS CLI, Access Key 또는 별도 IAM 사용자 생성은 필요하지 않습니다.
 
