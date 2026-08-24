@@ -2,7 +2,7 @@
 
 상태 확인의 기준은 CloudFormation 완료 상태와 템플릿이 제공하는 Outputs입니다. 웹 페이지가 열린다는 사실만으로 전체 설치 성공으로 판정하지 않습니다.
 
-> 2026-08-24 `v0.1.2` 수동 업로드에서 공인 인증서 적용과 `BootstrapWaitCondition`의 worker 실패 표시는 확인했습니다. `CREATE_COMPLETE` 이후의 성공 상태 확인 흐름은 아직 실제 AWS에서 검증하지 못했습니다.
+> 2026-08-24 `v0.1.3` 자체서명 수동 업로드에서 `CREATE_COMPLETE`, Outputs, 서버 health와 worker 검증 통과를 확인했습니다. `v0.1.4` 공인 인증서 기본 경로는 실제 AWS 재시험 전입니다.
 
 ## 1. CloudFormation에서 확인
 

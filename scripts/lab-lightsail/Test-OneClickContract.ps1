@@ -403,12 +403,13 @@ Assert-Contract (
         'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22'
 ) 'The immutable v0.1.0 release files changed unexpectedly.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ad3db49aa4242225b6b3fcd40b8f74e86579c6dc/releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ef444f600e8746286a5a0adeaf718aa40e06a33a/releases/lab-lightsail/v0.1.4/qfieldcloud-lab-lightsail-v0.1.4.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
     $readmeText.Contains('```mermaid') -and
-    $readmeText.Contains('create_project` worker 검증이 실패하여 스택이 롤백되었습니다.') -and
+    $readmeText.Contains('`v0.1.3` 자체서명 모드 실제 AWS 시험은 CloudFormation `CREATE_COMPLETE`') -and
+    $readmeText.Contains("``v0.1.4``는 검증된 ``v0.1.3`` 설치 코드에 Let’s Encrypt 공인 IP 인증서 기본값") -and
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
 

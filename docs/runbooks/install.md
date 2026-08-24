@@ -2,7 +2,7 @@
 
 기본 설치 방법은 GitHub에 보관된 완성 템플릿을 PC로 내려받아 AWS CloudFormation에 직접 업로드하는 방식입니다. 공개 S3 버킷, Git, PowerShell, AWS CLI와 Access Key는 필요하지 않습니다.
 
-> 2026-08-24 `v0.1.2` 시험은 공인 인증서 적용 뒤 `create_project` worker 내부 API 단계에서 실패했습니다. 수정 경로의 생성부터 `CREATE_COMPLETE`와 삭제까지 이어지는 성공 종단 간 시험은 아직 완료하지 못했습니다. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
+> 2026-08-24 `v0.1.3` 자체서명 시험은 수정된 worker 내부 API를 포함해 `CREATE_COMPLETE`까지 통과했습니다. Let’s Encrypt 공인 IP 인증서가 기본인 `v0.1.4`의 재시험과 성공 스택 삭제는 아직 남아 있습니다. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
 
 ## 시작 전 확인
 
@@ -20,7 +20,7 @@
 2. AWS 콘솔에서 **CloudFormation → Stacks → Create stack → With new resources (standard)**를 누릅니다.
 3. **Choose an existing template → Upload a template file → Choose file**을 선택하고 받은 파일을 올립니다.
 4. **Next**를 누르고 스택 이름에 `qfieldcloud-pilot`을 입력합니다.
-5. 기본값을 유지하고 **Next**를 눌러 **Configure stack options** 화면으로 이동합니다.
+5. `CertificateMode`가 기본 `letsencrypt-ip`인지 확인합니다. [현재 Let’s Encrypt Subscriber Agreement](https://letsencrypt.org/repository/)를 읽은 뒤 `LetsEncryptTermsAccepted`를 직접 `true`로 선택하고 **Next**를 누릅니다. 이 동의는 YAML이 자동 선택하지 않습니다.
 6. **Stack failure options → Preserve successfully provisioned resources**를 선택합니다.
 7. 마지막 화면에서 **Submit**을 누릅니다.
 8. 최대 150분 동안 기다립니다. `CREATE_COMPLETE`가 되면 **Outputs → HttpsUrl**을 엽니다.
@@ -33,7 +33,7 @@ AWS 화면 문구는 콘솔 언어와 개편 시점에 따라 조금 다를 수 
 
 ## 성공 확인
 
-CloudFormation의 **Outputs**에서 `HttpsUrl`, `InstallationStatus`, `AdministratorCredentials`, `DeleteInstructions`를 확인합니다. 자체서명 HTTPS 인증서가 기본값이므로 첫 접속 때 브라우저 경고가 나타납니다.
+CloudFormation의 **Outputs**에서 `HttpsUrl`, `InstallationStatus`, `AdministratorCredentials`, `DeleteInstructions`를 확인합니다. 기본 Let’s Encrypt 모드의 `HttpsUrl`은 고정 IPv4 주소를 직접 사용하며, 브라우저가 공인 인증서 체인을 정상 신뢰해야 합니다. 인증서 경고를 무시하고 성공으로 판정하지 않습니다.
 
 관리자 계정은 **Lightsail → Instances → qfieldcloud-pilot → Connect using SSH**에서 다음 명령으로 확인합니다.
 
@@ -45,7 +45,7 @@ sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
 
 ## 어떤 파일을 올려야 하나요?
 
-사용할 파일은 [`releases/lab-lightsail/v0.1.3/template.yaml`](../../releases/lab-lightsail/v0.1.3/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
+사용할 파일은 [`releases/lab-lightsail/v0.1.4/template.yaml`](../../releases/lab-lightsail/v0.1.4/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
 
 CloudFormation은 업로드한 템플릿을 사용자 계정의 내부 S3 업로드 공간에 보관할 수 있습니다. 이는 AWS 콘솔의 정상 동작이며 사용자가 공개 버킷이나 공개 정책을 만들 필요는 없습니다.
 
