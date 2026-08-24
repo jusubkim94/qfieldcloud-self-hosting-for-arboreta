@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "release_version": "v0.1.3",
+  "source_repository": "https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta.git",
+  "source_revision": "b9b9ecc0ec5263a0d7172164d31239653530cfa6",
+  "aws_region": "ap-northeast-2",
+  "quick_create_stack_name": "qfieldcloud-pilot",
+  "template": {
+    "file": "template.yaml",
+    "source_path": "infra/lab-lightsail/template.yaml",
+    "sha256": "c977828bf0828074643fb03fa5c3bba9b99c1313da9c5514333d485b233b7677",
+    "size_bytes": 21272
+  },
+  "bootstrap": {
+    "source_path": "scripts/lab-lightsail/bootstrap.sh",
+    "sha256": "66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c",
+    "size_bytes": 45306
+  }
+}

@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $sourcePath = Join-Path $PSScriptRoot 'QFieldCloudTemplateEditor.cs'
 $manifestPath = Join-Path $PSScriptRoot 'app.manifest'
-$templatePath = Join-Path $repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
+$templatePath = Join-Path $repositoryRoot 'releases/lab-lightsail/v0.1.3/template.yaml'
 $compilerCandidates = @(
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe')
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
@@ -28,7 +28,7 @@ foreach ($requiredPath in @($sourcePath, $manifestPath, $templatePath)) {
 }
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$outputPath = Join-Path $OutputDirectory 'QFieldCloudTemplateEditor-v0.1.2.exe'
+$outputPath = Join-Path $OutputDirectory 'QFieldCloudTemplateEditor-v0.1.3.exe'
 $arguments = @(
     '/nologo'
     '/target:winexe'

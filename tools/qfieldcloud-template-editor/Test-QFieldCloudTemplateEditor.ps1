@@ -7,11 +7,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$releaseExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.2/QFieldCloudTemplateEditor-v0.1.2.exe'
-$releaseChecksumsPath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.2/SHA256SUMS'
-$expectedReleaseHash = '69296db5eb8c990a58e1d518430a82be5a6ad20a0db39121762a8397a579be21'
+$releaseExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.3/QFieldCloudTemplateEditor-v0.1.3.exe'
+$releaseChecksumsPath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.3/SHA256SUMS'
+$expectedReleaseHash = 'e891e7446a8eedae9ce85724e6d6ce0549dd9ecb19b0a267ece26a9e23972690'
 $editorDownloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/b8682771baf3e938f984690971deb4a0647d9b6b/releases/tools/qfieldcloud-template-editor/v0.1.2/QFieldCloudTemplateEditor-v0.1.2.exe'
-$previousExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.1/QFieldCloudTemplateEditor-v0.1.1.exe'
+$previousExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.2/QFieldCloudTemplateEditor-v0.1.2.exe'
+$olderExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.1/QFieldCloudTemplateEditor-v0.1.1.exe'
 $legacyExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
 foreach ($releasePath in @($releaseExecutablePath, $releaseChecksumsPath)) {
     if (-not (Test-Path -LiteralPath $releasePath -PathType Leaf)) {
@@ -21,13 +22,17 @@ foreach ($releasePath in @($releaseExecutablePath, $releaseChecksumsPath)) {
 $releaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseExecutablePath).Hash.ToLowerInvariant()
 $releaseChecksums = Get-Content -Raw -LiteralPath $releaseChecksumsPath
 if ($releaseHash -ne $expectedReleaseHash -or
-    -not $releaseChecksums.Contains("$releaseHash  QFieldCloudTemplateEditor-v0.1.2.exe")) {
+    -not $releaseChecksums.Contains("$releaseHash  QFieldCloudTemplateEditor-v0.1.3.exe")) {
     throw 'The committed editor EXE does not match its reviewed SHA-256.'
 }
-if ((Get-Item -LiteralPath $releaseExecutablePath).VersionInfo.FileVersion -ne '0.1.2.0') {
+if ((Get-Item -LiteralPath $releaseExecutablePath).VersionInfo.FileVersion -ne '0.1.3.0') {
     throw 'The committed editor EXE has an unexpected file version.'
 }
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $previousExecutablePath).Hash.ToLowerInvariant() -ne
+    '69296db5eb8c990a58e1d518430a82be5a6ad20a0db39121762a8397a579be21') {
+    throw 'The immutable v0.1.2 editor EXE changed unexpectedly.'
+}
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $olderExecutablePath).Hash.ToLowerInvariant() -ne
     'd4acbcb0fc5f096652f0795154b55853f8af800c8f690b093b100058121e01a8') {
     throw 'The immutable v0.1.1 editor EXE changed unexpectedly.'
 }
@@ -45,7 +50,7 @@ if (-not $mainReadme.Contains($editorDownloadUrl) -or
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("qfc-template-editor-test-" + [guid]::NewGuid().ToString('N'))
 try {
     & (Join-Path $PSScriptRoot 'Build-QFieldCloudTemplateEditor.ps1') -OutputDirectory $temporaryRoot
-    $executablePath = Join-Path $temporaryRoot 'QFieldCloudTemplateEditor-v0.1.2.exe'
+    $executablePath = Join-Path $temporaryRoot 'QFieldCloudTemplateEditor-v0.1.3.exe'
     if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
         throw 'The editor executable was not created.'
     }

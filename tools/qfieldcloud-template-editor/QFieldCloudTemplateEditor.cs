@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Offline GUI editor for the unofficial QFieldCloud lab-lightsail CloudFormation template")]
 [assembly: AssemblyCompany("qfieldcloud-self-hosting-for-arboreta contributors")]
 [assembly: AssemblyProduct("QFieldCloud Standalone Template Editor")]
-[assembly: AssemblyVersion("0.1.2.0")]
-[assembly: AssemblyFileVersion("0.1.2.0")]
+[assembly: AssemblyVersion("0.1.3.0")]
+[assembly: AssemblyFileVersion("0.1.3.0")]
 
 namespace QFieldCloudTemplateEditor
 {
@@ -457,7 +457,7 @@ namespace QFieldCloudTemplateEditor
 
         public MainForm()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.2";
+            Text = "QFieldCloud Standalone Template Editor v0.1.3";
             Width = 1220;
             Height = 850;
             MinimumSize = new Size(980, 720);
@@ -474,7 +474,7 @@ namespace QFieldCloudTemplateEditor
             MainMenuStrip = (MenuStrip)Controls[Controls.Count - 2];
 
             string initial = TemplateEngine.LoadEmbeddedTemplate();
-            SetDocument(initial, "내장 검증본 v0.1.2", false);
+            SetDocument(initial, "내장 검증본 v0.1.3", false);
         }
 
         public void RenderTestScreenshots(string outputDirectory)
@@ -541,7 +541,7 @@ namespace QFieldCloudTemplateEditor
             tools.DropDownItems.Add("현재 YAML 검증", null, delegate { ValidateCurrent(true); });
             ToolStripMenuItem help = new ToolStripMenuItem("도움말(&H)");
             help.DropDownItems.Add("앱 정보", null, delegate { MessageBox.Show(this,
-                "QFieldCloud Standalone Template Editor v0.1.2\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
+                "QFieldCloud Standalone Template Editor v0.1.3\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
                 "앱 정보", MessageBoxButtons.OK, MessageBoxIcon.Information); });
             menu.Items.Add(file);
             menu.Items.Add(tools);
@@ -1041,7 +1041,7 @@ namespace QFieldCloudTemplateEditor
         private void ResetToEmbedded()
         {
             if (!ConfirmDiscard()) return;
-            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.2", false);
+            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.3", false);
         }
 
         private bool ConfirmDiscard()
@@ -1057,7 +1057,7 @@ namespace QFieldCloudTemplateEditor
 
         private void UpdateTitle()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.2" + (dirty ? " *" : "") + " — " + currentPath;
+            Text = "QFieldCloud Standalone Template Editor v0.1.3" + (dirty ? " *" : "") + " — " + currentPath;
         }
     }
 }
