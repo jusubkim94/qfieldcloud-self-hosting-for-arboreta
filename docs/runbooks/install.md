@@ -48,6 +48,8 @@ CloudFormation의 **Outputs**에서 `HttpsUrl`, `InstallationStatus`, `Administr
 
 `show-admin-credentials.sh`는 설치 때 만든 최초 비밀번호만 표시합니다. 관리자 화면에서 변경한 뒤에도 이 명령의 출력은 갱신되지 않으며, 표시되는 최초 비밀번호는 더 이상 로그인에 사용할 수 없습니다. 새 비밀번호를 파일, 채팅, GitHub 이슈, 로그 또는 스크린샷에 저장하지 않습니다.
 
+로그인과 비밀번호 변경이 끝나면 README의 [QFieldSync와 QField 앱 연결 예시](../../README.md#qfieldsync와-qfield-앱을-이-서버에-연결하기)를 따라 CloudFormation Output의 `HttpsUrl`을 두 프로그램에 등록합니다. 프로젝트 생성과 동기화 같은 이후 사용법은 해당 절에서 연결한 QFieldCloud 공식 문서를 따릅니다.
+
 ## 어떤 파일을 올려야 하나요?
 
 사용할 파일은 [`releases/lab-lightsail/v0.1.4/template.yaml`](../../releases/lab-lightsail/v0.1.4/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
