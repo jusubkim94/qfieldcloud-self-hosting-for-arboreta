@@ -1,6 +1,7 @@
 # Local release outputs and runtime state. Never commit credentials or private keys.
 /.local/
 /artifacts/
+/tools/qfieldcloud-template-editor/output/
 /infra/lab-lightsail/parameters.local.json
 **/secrets.env
 **/runtime.env
