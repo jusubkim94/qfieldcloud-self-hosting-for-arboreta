@@ -16,14 +16,14 @@
 
 ## 설치
 
-1. README의 **QFieldCloud 설치 파일 다운로드** 버튼으로 `template.yaml`을 받습니다.
+1. README의 **QFieldCloud 설치 파일 다운로드** 버튼으로 ZIP 파일을 받고 압축을 풉니다.
 2. AWS 콘솔에서 **CloudFormation → Stacks → Create stack → With new resources (standard)**를 누릅니다.
-3. **Choose an existing template → Upload a template file → Choose file**을 선택하고 받은 파일을 올립니다.
+3. **Choose an existing template → Upload a template file → Choose file**을 선택하고 압축을 풀어 나온 `template.yaml`을 올립니다.
 4. **Next**를 누르고 스택 이름에 `qfieldcloud-pilot`을 입력합니다.
 5. `CertificateMode`가 기본 `letsencrypt-ip`인지 확인합니다. [현재 Let’s Encrypt Subscriber Agreement](https://letsencrypt.org/repository/)를 읽은 뒤 `LetsEncryptTermsAccepted`를 직접 `true`로 선택하고 **Next**를 누릅니다. 이 동의는 YAML이 자동 선택하지 않습니다.
 6. **Stack failure options → Preserve successfully provisioned resources**를 선택합니다.
 7. 마지막 화면에서 **Submit**을 누릅니다.
-8. 최대 150분 동안 기다립니다. `CREATE_COMPLETE`가 되면 **Outputs → HttpsUrl**을 엽니다.
+8. 최대 150분 동안 기다립니다. `CREATE_COMPLETE`가 되고 **Outputs → InstallationStatus**가 `installation-complete`인지 확인합니다.
 
 `Preserve successfully provisioned resources`는 업로드한 YAML의 속성이 아니라 CloudFormation이 스택을 생성할 때 받는 실행 옵션입니다. 따라서 YAML이나 GUI 편집기가 이 선택을 자동으로 켤 수 없습니다. AWS CLI를 사용하는 별도 자동화에서는 `create-stack --on-failure DO_NOTHING`으로 같은 동작을 요청할 수 있지만, 이 설치 실행서는 Access Key가 필요 없는 웹 콘솔 방식을 유지합니다. 자세한 규격은 [AWS CloudFormation의 실패 리소스 보존 안내](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html)를 참고합니다.
 
@@ -35,13 +35,18 @@ AWS 화면 문구는 콘솔 언어와 개편 시점에 따라 조금 다를 수 
 
 CloudFormation의 **Outputs**에서 `HttpsUrl`, `InstallationStatus`, `AdministratorCredentials`, `DeleteInstructions`를 확인합니다. 기본 Let’s Encrypt 모드의 `HttpsUrl`은 고정 IPv4 주소를 직접 사용하며, 브라우저가 공인 인증서 체인을 정상 신뢰해야 합니다. 인증서 경고를 무시하고 성공으로 판정하지 않습니다.
 
-관리자 계정은 **Lightsail → Instances → qfieldcloud-pilot → Connect using SSH**에서 다음 명령으로 확인합니다.
+1. **Lightsail → Instances → qfieldcloud-pilot → Connect using SSH**에서 다음 명령을 실행합니다.
 
-```bash
-sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
-```
+   ```bash
+   sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
+   ```
 
-비밀번호를 파일, 채팅, GitHub 이슈나 로그에 저장하지 않습니다.
+2. 명령이 표시한 `URL`을 열고, 표시된 사용자 이름(기본값 `qfcadmin`)과 최초 비밀번호로 로그인합니다.
+3. 오른쪽 위의 사용자 이름 `qfcadmin`을 누르고 **Change password**를 선택합니다.
+4. **Old password**에는 최초 비밀번호를 넣고, **New password**와 **New password confirmation**에는 새 비밀번호를 입력한 뒤 **Change password**를 누릅니다.
+5. 새 비밀번호를 신뢰할 수 있는 비밀번호 관리자에 저장합니다.
+
+`show-admin-credentials.sh`는 설치 때 만든 최초 비밀번호만 표시합니다. 관리자 화면에서 변경한 뒤에도 이 명령의 출력은 갱신되지 않으며, 표시되는 최초 비밀번호는 더 이상 로그인에 사용할 수 없습니다. 새 비밀번호를 파일, 채팅, GitHub 이슈, 로그 또는 스크린샷에 저장하지 않습니다.
 
 ## 어떤 파일을 올려야 하나요?
 

@@ -59,6 +59,7 @@ CloudFormation 또는 Lightsail 권한이 부족하면 AWS의 권한 오류로 �
 - CloudFormation Outputs에는 비밀값 대신 브라우저 SSH에서 실행할 명령만 표시합니다.
 - bootstrap 로그는 root 전용 파일에 기록하고 일반 CloudFormation 출력으로 보내지 않습니다.
 - `show-admin-credentials.sh`는 대화형 터미널이 아니거나 출력이 재지정되면 비밀번호 표시를 거부합니다.
+- `show-admin-credentials.sh`가 표시하는 값은 설치 때 만든 최초 비밀번호입니다. 관리자가 QFieldCloud 화면에서 비밀번호를 변경해도 이 파일은 갱신되지 않으므로 이후에는 현재 비밀번호 확인이나 복구 수단으로 사용하지 않습니다.
 - Secret을 확인한 뒤에는 신뢰할 수 있는 비밀번호 관리자에 직접 옮기고 채팅·화면공유·GitHub 이슈에 붙여 넣지 않습니다.
 - Secret이 노출되면 파일만 지우지 말고 해당 값을 폐기하고 교체합니다.
 

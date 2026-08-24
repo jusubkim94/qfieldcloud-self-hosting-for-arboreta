@@ -415,6 +415,27 @@ Assert-Contract (
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
 
+$readmeDownloadIndex = $readmeText.IndexOf('설치 파일 다운로드', [StringComparison]::Ordinal)
+$readmeUploadIndex = $readmeText.IndexOf('Upload a template file', [StringComparison]::Ordinal)
+$readmeCompleteIndex = $readmeText.IndexOf('`CREATE_COMPLETE`', [StringComparison]::Ordinal)
+$readmeCredentialsIndex = $readmeText.IndexOf('show-admin-credentials.sh', [StringComparison]::Ordinal)
+$readmePasswordChangeIndex = $readmeText.IndexOf('Change password', [StringComparison]::Ordinal)
+$readmeOptionalSettingsIndex = $readmeText.IndexOf('## 선택: 설치 설정을 바꾸고 싶다면', [StringComparison]::Ordinal)
+Assert-Contract (
+    $readmeDownloadIndex -ge 0 -and
+    $readmeUploadIndex -gt $readmeDownloadIndex -and
+    $readmeCompleteIndex -gt $readmeUploadIndex -and
+    $readmeCredentialsIndex -gt $readmeCompleteIndex -and
+    $readmePasswordChangeIndex -gt $readmeCredentialsIndex -and
+    $readmeOptionalSettingsIndex -gt $readmePasswordChangeIndex -and
+    $readmeText.Contains('오른쪽 위의 사용자 이름 `qfcadmin`') -and
+    $readmeText.Contains('**Old password**') -and
+    $readmeText.Contains('**New password confirmation**') -and
+    $readmeText.Contains('최초 비밀번호는 더 이상 로그인에 사용할 수 없지만') -and
+    $readmeText.Contains('SSH 명령은 이후에도 최초 비밀번호를 표시합니다') -and
+    $readmeText.Contains('`/admin/password_change/`')
+) 'README must keep the beginner install, first-login, and password-change steps in order and explain that the helper only shows the initial password.'
+
 Assert-Contract (
     $verificationText.Contains('`ap-northeast-2` / `ap-northeast-2a`') -and
     $verificationText.Contains('`qfc`') -and
