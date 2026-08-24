@@ -45,7 +45,7 @@ sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
 
 ## 어떤 파일을 올려야 하나요?
 
-사용할 파일은 [`releases/lab-lightsail/v0.1.1/template.yaml`](../../releases/lab-lightsail/v0.1.1/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
+사용할 파일은 [`releases/lab-lightsail/v0.1.2/template.yaml`](../../releases/lab-lightsail/v0.1.2/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
 
 CloudFormation은 업로드한 템플릿을 사용자 계정의 내부 S3 업로드 공간에 보관할 수 있습니다. 이는 AWS 콘솔의 정상 동작이며 사용자가 공개 버킷이나 공개 정책을 만들 필요는 없습니다.
 
