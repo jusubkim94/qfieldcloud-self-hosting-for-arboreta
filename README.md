@@ -118,10 +118,6 @@ standalone 서버 node 수는 1로 고정됩니다. 여러 node는 YAML 한 항�
 - Template SHA-256: `798f2f5aed1c88e27be81db79a06c7adf61f7e5f9ad8fcd3d7f4a114f8d71ffa`
 - 고정된 설치 소스: `d00c5fa4581188299565938d8324103e740a6d9c`
 
-저장소의 [`infra/lab-lightsail/template.yaml`](infra/lab-lightsail/template.yaml)은 릴리스 파일을 만드는 원본 틀이므로 직접 업로드하지 마세요. 사용자는 위 다운로드 버튼의 완성 파일만 사용합니다.
-
-CloudFormation 콘솔은 업로드한 파일을 사용자 AWS 계정의 내부 S3 업로드 버킷에 보관할 수 있습니다. 사용자가 공개 S3 버킷이나 공개 정책을 만들 필요는 없습니다.
-
 <details>
 <summary>관리자 비밀번호가 어떻게 처리되는지 자세히 보기</summary>
 
