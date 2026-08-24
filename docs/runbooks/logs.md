@@ -1,6 +1,6 @@
 # 로그 실행서
 
-현재 실제 AWS 스택은 검증된 기본 `self-signed` 경로를 사용합니다. 선택 `letsencrypt-ip`은 현재 스택에 적용하지 않았고 실제 최초 발급·자동 갱신 종단 간 검증 전이므로, 아래 공인 인증서 로그 절차는 해당 모드로 새로 배포한 서버에만 적용합니다.
+2026-08-24 실제 AWS `letsencrypt-ip` 시험에서 공인 IP 인증서 발급은 성공했지만 Nginx 적용 검증이 실패해 이전 자체서명 인증서로 복구됐습니다. `v0.1.2`의 적용 재시도와 자동 갱신은 아직 실제 종단 간 검증 전이므로, 아래 공인 인증서 로그 절차는 해당 모드 서버에만 적용합니다.
 
 ## 우선순위
 
@@ -68,7 +68,10 @@ sudo systemctl status qfieldcloud-certificate-renew.timer --no-pager --lines=30
 sudo systemctl status qfieldcloud-certificate-renew.service --no-pager --lines=30
 sudo journalctl -u qfieldcloud-certificate-renew.service --since '24 hours ago' -n 200 --no-pager
 sudo tail -n 200 /opt/qfieldcloud/state/certbot-log/last-command.log
+sudo tail -n 50 /opt/qfieldcloud/state/certbot-log/last-validation.log
 ```
+
+`last-validation.log`는 최대 60초의 Nginx 적용 재시도 중 마지막 시도만 원자적으로 보존합니다. `expected_fingerprint`와 `observed_fingerprint`가 다르면 Nginx 인증서 전환 실패이고, 두 값이 같은데 `curl_exit`이 `0`이 아니면 TLS 신뢰 또는 HTTPS 응답 실패입니다.
 
 `/opt/qfieldcloud/state/certbot`, `certbot-work`, `certbot-log`, `certs`는 ACME 계정·개인키·발급 이력이 있을 수 있는 root 전용 경로입니다. 디렉터리를 통째로 archive하거나 채팅·GitHub에 올리지 않습니다. `last-certificate-renewal-failure`는 상태 도구로 존재 여부를 먼저 확인하고, 원본 로그를 공유해야 한다면 CA order URL, 공개 IP, 이메일, 토큰처럼 운영 식별에 도움이 되는 값도 가립니다.
 

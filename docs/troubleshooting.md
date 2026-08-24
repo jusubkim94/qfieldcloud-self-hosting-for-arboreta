@@ -8,13 +8,13 @@
 - 실패한 설치를 무작정 반복하지 않습니다. 같은 이름의 자원 충돌과 추가 비용이 생길 수 있습니다.
 - 이 파일럿에는 자동 스냅샷과 애플리케이션 백업이 없습니다. 삭제나 교체는 데이터를 영구 손실시킬 수 있습니다.
 
-> 2026-08-24 `v0.1.0` 수동 업로드 생성은 실제 AWS에서 `create_project` worker 검증까지 진행했으나 실패했습니다. 성공 종단 간 검증은 아직 완료하지 못했습니다.
+> 2026-08-24 `v0.1.0` 수동 업로드 생성은 실제 AWS에서 `create_project` worker 검증에 실패했습니다. `v0.1.1` 재시험은 Let’s Encrypt IP 인증서 발급 후 Nginx 적용 검증에 실패했습니다. 두 경우 모두 안전하게 중단됐으며 성공 종단 간 검증은 아직 완료하지 못했습니다.
 
 ## 설치 파일이 내려받아지지 않음
 
 1. README의 초록색 **QFieldCloud 설치 파일 다운로드** 버튼을 다시 누릅니다.
 2. GitHub 로그인이나 브라우저 다운로드 차단 알림이 있는지 확인합니다.
-3. 계속 실패하면 [`releases/lab-lightsail/v0.1.1/template.yaml`](../releases/lab-lightsail/v0.1.1/template.yaml)을 열고 오른쪽 위 다운로드 버튼을 누릅니다.
+3. 계속 실패하면 [`releases/lab-lightsail/v0.1.2/template.yaml`](../releases/lab-lightsail/v0.1.2/template.yaml)을 열고 오른쪽 위 다운로드 버튼을 누릅니다.
 4. 파일 이름이 `template.yaml`이고 빈 파일이 아닌지 확인합니다.
 
 `infra/lab-lightsail/template.yaml`은 자리표시자가 있는 원본 틀이므로 업로드하지 않습니다.
@@ -76,7 +76,9 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 | 공인 인증서 갱신 실패 | `certificate_renewal`, 마지막 확인 시각, timer 상태 | 유효한 이전 인증서나 실패 표식 삭제 |
 | 공인 인증서인데 주소 불일치 | 접속 IP와 인증서 IP SAN, CA chain | 인증서 검증 비활성화 |
 
-공인 인증서 최초 발급과 시간 경과 자동 갱신은 실제 AWS에서 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
+설치기는 공인 인증서를 Nginx에 적용한 뒤 최대 60초 동안 새 인증서 지문과 신뢰된 HTTPS 응답을 다시 확인합니다. 각 시도의 마지막 결과는 root만 읽을 수 있는 `/opt/qfieldcloud/state/certbot-log/last-validation.log`에 저장합니다. `status`, `expected_fingerprint`, `observed_fingerprint`, `openssl_exit`, `curl_exit`을 확인하면 새 인증서 전환 지연과 TLS 신뢰 오류를 구분할 수 있습니다. 이 파일에는 개인키를 기록하지 않지만, 공유하기 전 공개 IP 등 운영 식별정보를 가립니다.
+
+공인 IP 인증서 발급 자체는 실제 AWS에서 확인했지만, Nginx 적용부터 설치 완료 및 시간 경과 자동 갱신까지는 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
 
 ## 데이터베이스, 저장소 또는 worker 오류
 
