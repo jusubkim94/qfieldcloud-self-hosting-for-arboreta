@@ -81,7 +81,7 @@ write_state_value() {
 write_validation_log() {
   local validation_status="$1"
   local validation_attempt="$2"
-  local validation_attempt_limit="$3"
+  local validation_attempt_limit_value="$3"
   local expected_fingerprint="$4"
   local observed_fingerprint="$5"
   local openssl_exit="$6"
@@ -95,7 +95,7 @@ write_validation_log() {
       "mode=$mode" \
       "status=$validation_status" \
       "attempt=$validation_attempt" \
-      "attempt_limit=$validation_attempt_limit" \
+      "attempt_limit=$validation_attempt_limit_value" \
       "expected_fingerprint=$expected_fingerprint" \
       "observed_fingerprint=$observed_fingerprint" \
       "openssl_exit=$openssl_exit" \

@@ -2,7 +2,7 @@
 
 기본 설치 방법은 GitHub에 보관된 완성 템플릿을 PC로 내려받아 AWS CloudFormation에 직접 업로드하는 방식입니다. 공개 S3 버킷, Git, PowerShell, AWS CLI와 Access Key는 필요하지 않습니다.
 
-> 2026-08-24 실제 생성 시험은 `create_project` worker 검증 실패로 끝났습니다. 생성부터 `CREATE_COMPLETE`와 삭제까지 이어지는 성공 종단 간 시험은 아직 완료하지 못했습니다. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
+> 2026-08-24 `v0.1.2` 시험은 공인 인증서 적용 뒤 `create_project` worker 내부 API 단계에서 실패했습니다. 수정 경로의 생성부터 `CREATE_COMPLETE`와 삭제까지 이어지는 성공 종단 간 시험은 아직 완료하지 못했습니다. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
 
 ## 시작 전 확인
 
@@ -45,7 +45,7 @@ sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
 
 ## 어떤 파일을 올려야 하나요?
 
-사용할 파일은 [`releases/lab-lightsail/v0.1.2/template.yaml`](../../releases/lab-lightsail/v0.1.2/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
+사용할 파일은 [`releases/lab-lightsail/v0.1.3/template.yaml`](../../releases/lab-lightsail/v0.1.3/template.yaml)입니다. [`infra/lab-lightsail/template.yaml`](../../infra/lab-lightsail/template.yaml)은 릴리스 제작용 원본 틀이므로 직접 올리지 않습니다.
 
 CloudFormation은 업로드한 템플릿을 사용자 계정의 내부 S3 업로드 공간에 보관할 수 있습니다. 이는 AWS 콘솔의 정상 동작이며 사용자가 공개 버킷이나 공개 정책을 만들 필요는 없습니다.
 

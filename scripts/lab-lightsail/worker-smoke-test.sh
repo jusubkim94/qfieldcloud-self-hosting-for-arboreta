@@ -859,7 +859,7 @@ print("QFC_SMOKE_FAILURE_METADATA=" + json.dumps(
   fi
 
   compose_bounded 30 logs --no-color --timestamps --since 30m --tail 400 \
-    app worker_wrapper >"$diagnostics_dir/compose-app-worker.log" 2>&1 || true
+    nginx app worker_wrapper >"$diagnostics_dir/compose-app-worker.log" 2>&1 || true
   chmod 0600 "$diagnostics_dir/compose-app-worker.log"
 
   if [[ $container_id =~ ^[0-9a-f]{64}$ ]]; then

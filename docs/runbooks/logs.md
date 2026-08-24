@@ -1,6 +1,6 @@
 # 로그 실행서
 
-2026-08-24 실제 AWS `letsencrypt-ip` 시험에서 공인 IP 인증서 발급은 성공했지만 Nginx 적용 검증이 실패해 이전 자체서명 인증서로 복구됐습니다. `v0.1.2`의 적용 재시도와 자동 갱신은 아직 실제 종단 간 검증 전이므로, 아래 공인 인증서 로그 절차는 해당 모드 서버에만 적용합니다.
+2026-08-24 실제 AWS `v0.1.2` 시험에서 공인 IP 인증서 발급·Nginx 적용·신뢰된 HTTPS 확인과 자동 갱신 timer 설치까지 성공했습니다. 시간 경과 후의 실제 자동 갱신과 전체 설치 완료는 아직 검증 전이므로, 아래 공인 인증서 로그 절차는 해당 모드 서버에만 적용합니다.
 
 ## 우선순위
 
@@ -49,7 +49,7 @@ worker smoke test가 실패하면 시험 프로젝트를 삭제하기 전에 다
 
 - `summary.txt`: 시각, 릴리스, 작업 종류와 ID
 - `job.json`: 제한된 Job output·feedback과 오류 분류
-- `compose-app-worker.log`: 최근 30분의 app·worker wrapper 마지막 400줄
+- `compose-app-worker.log`: 최근 30분의 Nginx·app·worker wrapper 마지막 400줄
 - `qgis-container-state.txt`, `qgis-container.log`: 정확히 일치하는 임시 QGIS 컨테이너가 아직 남아 있을 때만 생성
 - `host-capacity.txt`, `kernel-oom.log`: 메모리·디스크 상태와 OOM 강제 종료 흔적
 

@@ -36,10 +36,12 @@ install_root="${QFC_INSTALL_ROOT:-/opt/qfieldcloud}"
 versions_file="$install_root/versions.env"
 runtime_env="$install_root/state/runtime.env"
 compose_file="$install_root/compose.yaml"
+nginx_worker_api_template="$install_root/nginx-worker-api.conf.template"
 public_host_file="$install_root/state/public-host"
 certificate_mode_file="$install_root/state/certificate-mode"
 
 for required_file in "$versions_file" "$runtime_env" "$compose_file" \
+  "$nginx_worker_api_template" \
   "$public_host_file" "$certificate_mode_file"; do
   if [[ ! -f $required_file ]]; then
     printf '{"overall":"error","reason":"installation-incomplete"}\n'
@@ -146,6 +148,7 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
   approved_paths=(
     config/qfieldcloud-v26.25.env
     runtime/lab-lightsail/compose.yaml
+    runtime/lab-lightsail/nginx-worker-api.conf.template
     scripts/lab-lightsail/health-check.sh
     scripts/lab-lightsail/show-admin-credentials.sh
     scripts/lab-lightsail/worker-smoke-test.sh
@@ -163,6 +166,11 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
   fi
   if [[ $live_files_match == "true" ]] && \
     ! cmp -s -- "$compose_file" "$installer_root/runtime/lab-lightsail/compose.yaml"; then
+    live_files_match="false"
+  fi
+  if [[ $live_files_match == "true" ]] && \
+    ! cmp -s -- "$nginx_worker_api_template" \
+      "$installer_root/runtime/lab-lightsail/nginx-worker-api.conf.template"; then
     live_files_match="false"
   fi
   if [[ $live_files_match == "true" ]]; then

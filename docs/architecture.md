@@ -4,7 +4,7 @@
 
 `lab-lightsail`은 개인 담당자가 완성된 YAML 파일을 CloudFormation에 업로드하여 단일 Lightsail 서버에 QFieldCloud를 설치하는 저비용 파일럿입니다.
 
-현재 다운로드용 `v0.1.2` 완성 템플릿은 저장소에 포함되어 있습니다. 아래 구조는 현재 기본 흐름이며 실제 AWS 성공 종단 간 검증 완료를 의미하지는 않습니다.
+현재 다운로드용 `v0.1.3` 완성 템플릿은 저장소에 포함되어 있습니다. 아래 구조는 현재 기본 흐름이며 실제 AWS 성공 종단 간 검증 완료를 의미하지는 않습니다.
 
 ## 브라우저 수동 업로드 흐름
 
@@ -39,13 +39,14 @@ flowchart TB
         Scheduler[QFieldCloud 작업 스케줄러] --> App
         Wrapper[worker wrapper] --> App
         Wrapper -->|Docker socket| QGIS[임시 QGIS 3 worker]
-        QGIS --> App
+        QGIS -->|Docker 내부 HTTP :8080| WorkerProxy[worker 전용 Nginx]
+        WorkerProxy --> App
     end
 ```
 
 서버는 Linux 4GB RAM, 2 vCPU, 80GB SSD와 월 4TB 전송량이 포함된 Lightsail 상품입니다. 4GB와 worker 한 개는 공식 최소사양이 아니라 작은 파일럿을 위한 검증 가정입니다.
 
-PostgreSQL/PostGIS와 객체 저장소 관리 포트는 외부에 공개하지 않습니다. HTTP 80과 HTTPS 443만 공개하며 SSH 22는 Lightsail 브라우저 SSH 경로로 제한합니다.
+PostgreSQL/PostGIS와 객체 저장소 관리 포트는 외부에 공개하지 않습니다. HTTP 80과 HTTPS 443만 공개하며 SSH 22는 Lightsail 브라우저 SSH 경로로 제한합니다. worker API의 8080은 고정된 Docker 내부망 `172.30.0.0/24`에서만 접근할 수 있고 Lightsail 호스트 포트로 게시하지 않습니다.
 
 ## 설치 완료 경계
 

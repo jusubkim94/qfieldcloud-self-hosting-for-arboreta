@@ -38,14 +38,17 @@ $healthText = Get-RepositoryText 'scripts/lab-lightsail/health-check.sh'
 $workerSmokeText = Get-RepositoryText 'scripts/lab-lightsail/worker-smoke-test.sh'
 $renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
 $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
+$workerNginxText = Get-RepositoryText 'runtime/lab-lightsail/nginx-worker-api.conf.template'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
-$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
-$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/manifest.json'
-$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/SHA256SUMS'
-$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
-$previousReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/template.yaml'
-$previousReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
+$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/template.yaml'
+$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/manifest.json'
+$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/SHA256SUMS'
+$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
+$previousReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
+$previousReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
+$olderReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/template.yaml'
+$olderReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
 $legacyReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
 $legacyReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
 
@@ -196,6 +199,25 @@ Assert-Contract (
     $composeText.Contains('image: "${CERTBOT_IMAGE:?required}"')
 ) 'Pinned HTTPS issuance, renewal, bounded activation retry, or diagnostics are missing.'
 
+Assert-Contract (
+    $composeText.Contains('QFIELDCLOUD_WORKER_QFIELDCLOUD_URL: "http://nginx:8080/api/v1/"') -and
+    $composeText.Contains('./nginx-worker-api.conf.template:/etc/nginx/templates/qfieldcloud-worker-api.conf.template:ro') -and
+    $composeText.Contains("expose:`n      - `"8080`"") -and
+    $bootstrapText.Contains('runtime/lab-lightsail/nginx-worker-api.conf.template') -and
+    $healthText.Contains('runtime/lab-lightsail/nginx-worker-api.conf.template') -and
+    $workerNginxText.Contains('listen 8080;') -and
+    $workerNginxText.Contains('allow 172.30.0.0/24;') -and
+    $workerNginxText.Contains('deny all;') -and
+    $workerNginxText.Contains('proxy_set_header X-Forwarded-Proto https;') -and
+    $workerNginxText.Contains('proxy_set_header Host ${QFIELDCLOUD_HOST};') -and
+    $workerNginxText.Contains('location /storage-download/')
+) 'The Docker-private worker API proxy is missing or no longer preserves secure public request semantics.'
+
+Assert-Contract (
+    $renewText.Contains('local validation_attempt_limit_value="$3"') -and
+    -not $renewText.Contains('local validation_attempt_limit="$3"')
+) 'Certificate validation logging still shadows its readonly retry limit.'
+
 $imageLines = @(
     $versionText -split "`r?`n" |
         Where-Object { $_ -match '^[A-Z0-9_]+_IMAGE=' -and $_ -notmatch '^QFC_QGIS4_IMAGE=' }
@@ -308,14 +330,14 @@ finally {
     $releaseArchive.Dispose()
 }
 Assert-Contract (
-    $releaseManifest.release_version -eq 'v0.1.2' -and
-    $releaseManifest.source_revision -eq '00b34aff5370b64f1e5bfa3be09dbad8002b8426' -and
+    $releaseManifest.release_version -eq 'v0.1.3' -and
+    $releaseManifest.source_revision -eq 'b9b9ecc0ec5263a0d7172164d31239653530cfa6' -and
     $releaseManifest.template.sha256 -eq $releaseTemplateHash -and
-    $releaseTemplateHash -eq 'f3c3391704bf07f7ab6b13d1b16115a105d50e4f07a52b4a5ff337bf2adabff4' -and
+    $releaseTemplateHash -eq 'c977828bf0828074643fb03fa5c3bba9b99c1313da9c5514333d485b233b7677' -and
     $releaseChecksums.Contains("$releaseTemplateHash  template.yaml") -and
-    $releaseArchiveHash -eq '8c5200d55d4b3be62fcea84e5fa5492cd1eb59d7db76d42af857f00ae82754b9' -and
-    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.2.zip")
-) 'The committed v0.1.2 release manifest or checksum does not match template.yaml.'
+    $releaseArchiveHash -eq 'cd50246fbcb7cf8445683de9ea0c680e3c6438904d7b3b2f21d7a798e6f74761' -and
+    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.3.zip")
+) 'The committed v0.1.3 release manifest or checksum does not match template.yaml.'
 Assert-Contract (
     -not $releaseTemplateText.Contains($zeroRevision) -and
     -not $releaseTemplateText.Contains($zeroChecksum) -and
@@ -326,8 +348,14 @@ Assert-Contract (
 
 Assert-Contract (
     (Get-FileHash -Algorithm SHA256 -LiteralPath $previousReleaseTemplatePath).Hash.ToLowerInvariant() -eq
-        '33b36470d8a5b31aa4d634d9ecf8ca9804d238b03568feb4ebf11849f91e5b2b' -and
+        'f3c3391704bf07f7ab6b13d1b16115a105d50e4f07a52b4a5ff337bf2adabff4' -and
     (Get-FileHash -Algorithm SHA256 -LiteralPath $previousReleaseArchivePath).Hash.ToLowerInvariant() -eq
+        '8c5200d55d4b3be62fcea84e5fa5492cd1eb59d7db76d42af857f00ae82754b9'
+) 'The immutable v0.1.2 release files changed unexpectedly.'
+Assert-Contract (
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseTemplatePath).Hash.ToLowerInvariant() -eq
+        '33b36470d8a5b31aa4d634d9ecf8ca9804d238b03568feb4ebf11849f91e5b2b' -and
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseArchivePath).Hash.ToLowerInvariant() -eq
         '5620adf6e304172750ab10c7cee8b98b82965f8ea3efa99fb815256b7dad657c'
 ) 'The immutable v0.1.1 release files changed unexpectedly.'
 Assert-Contract (
@@ -337,7 +365,7 @@ Assert-Contract (
         'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22'
 ) 'The immutable v0.1.0 release files changed unexpectedly.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/b8682771baf3e938f984690971deb4a0647d9b6b/releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ad3db49aa4242225b6b3fcd40b8f74e86579c6dc/releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
