@@ -19,6 +19,9 @@ param(
     [ValidatePattern('^(?:[A-Za-z0-9_-]{1,64})?$')]
     [string]$Profile = '',
 
+    [ValidateSet('object', 'json')]
+    [string]$PlanOutputFormat = 'object',
+
     [switch]$Execute
 )
 
@@ -592,7 +595,12 @@ $plan = [pscustomobject]@{
     SourceReachabilityCheck = 'exact-GitHub-raw-bytes-before-any-AWS-write'
     QuickCreateUrl = if ($Execute) { 'generated-after-version-id-verification' } else { 'available-only-after--Execute' }
 }
-$plan
+if ($PlanOutputFormat -ceq 'json') {
+    $plan | ConvertTo-Json -Compress
+}
+else {
+    $plan
+}
 
 if (-not $Execute) {
     Write-Host '계획만 검증했습니다. AWS API를 호출하거나 S3 객체를 만들지 않았습니다.'
