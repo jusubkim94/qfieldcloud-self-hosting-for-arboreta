@@ -41,6 +41,7 @@ $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
 $workerNginxText = Get-RepositoryText 'runtime/lab-lightsail/nginx-worker-api.conf.template'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
+$verificationText = Get-RepositoryText 'docs/verification/lab-lightsail-v0.1.4-2026-08-25.md'
 $releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/template.yaml'
 $releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/manifest.json'
 $releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/SHA256SUMS'
@@ -409,8 +410,23 @@ Assert-Contract (
     $readmeText.Contains('Upload a template file') -and
     $readmeText.Contains('```mermaid') -and
     $readmeText.Contains('`v0.1.3` 자체서명 모드 실제 AWS 시험은 CloudFormation `CREATE_COMPLETE`') -and
-    $readmeText.Contains("``v0.1.4``는 검증된 ``v0.1.3`` 설치 코드에 Let’s Encrypt 공인 IP 인증서 기본값") -and
+    $readmeText.Contains("``v0.1.4`` 기본 Let’s Encrypt 경로는 서울 리전의 새 AWS 스택에서 ``CREATE_COMPLETE``") -and
+    $readmeText.Contains('(docs/verification/lab-lightsail-v0.1.4-2026-08-25.md)') -and
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
+
+Assert-Contract (
+    $verificationText.Contains('`ap-northeast-2` / `ap-northeast-2a`') -and
+    $verificationText.Contains('`qfc`') -and
+    $verificationText.Contains('`qfieldcloud-pilot`') -and
+    $verificationText.Contains('`medium_3_0` / `ubuntu_24_04`') -and
+    $verificationText.Contains('`798f2f5aed1c88e27be81db79a06c7adf61f7e5f9ad8fcd3d7f4a114f8d71ffa`') -and
+    $verificationText.Contains('`d00c5fa4581188299565938d8324103e740a6d9c`') -and
+    $verificationText.Contains('`66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c`') -and
+    $verificationText.Contains('`807301a01287a3d389b3be3521c0f3d00e3331e3f831ac1a571720554f61ac00`') -and
+    $verificationText.Contains("시간이 실제로 흐른 뒤 timer가 Let’s Encrypt 인증서를 갱신하는 과정") -and
+    $verificationText.Contains('이번 배포는 실패하지 않았으므로 이 옵션을 경험적으로 시험하지 못했습니다') -and
+    $verificationText.Contains('브라우저의 **Upload a template file**로 올리는 화면 흐름')
+) 'The v0.1.4 AWS verification record is missing observed provenance, success evidence, or explicit unverified boundaries.'
 
 Write-Output 'Manual-download Lightsail static contract validation passed. AWS and S3 were not called.'

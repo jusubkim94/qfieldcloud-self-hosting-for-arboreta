@@ -2,7 +2,7 @@
 
 상태 확인의 기준은 CloudFormation 완료 상태와 템플릿이 제공하는 Outputs입니다. 웹 페이지가 열린다는 사실만으로 전체 설치 성공으로 판정하지 않습니다.
 
-> 2026-08-24 `v0.1.3` 자체서명 수동 업로드에서 `CREATE_COMPLETE`, Outputs, 서버 health와 worker 검증 통과를 확인했습니다. `v0.1.4` 공인 인증서 기본 경로는 실제 AWS 재시험 전입니다.
+> 2026-08-24 `v0.1.3` 자체서명 수동 업로드와 2026-08-25 `v0.1.4` 기본 공인 인증서 CloudShell 생성에서 `CREATE_COMPLETE`, Outputs와 완료 gate 통과를 확인했습니다. `v0.1.4`의 외부 HTTPS·API 관찰값과 gate 근거는 [실제 AWS 검증 기록](../verification/lab-lightsail-v0.1.4-2026-08-25.md)에 구분했습니다.
 
 ## 1. CloudFormation에서 확인
 

@@ -87,10 +87,10 @@ CloudFormation 콘솔은 업로드한 파일을 사용자 AWS 계정의 내부 S
 ## 현재 검증 범위
 
 - CloudFormation 문법, Bash·PowerShell 문법, 고정 이미지 digest, Secret 패턴과 문서 링크는 로컬 정적 검사로 확인했습니다.
-- 2026-08-24 `v0.1.3` 자체서명 모드 실제 AWS 시험은 CloudFormation `CREATE_COMPLETE`, 서비스 상태, QGIS 3 worker 작업과 임시 자원 정리까지 통과했습니다. 성공 스택 삭제와 `v0.1.4` 공인 인증서 기본 경로 재시험은 아직 남아 있습니다.
+- 2026-08-24 `v0.1.3` 자체서명 모드 실제 AWS 시험은 CloudFormation `CREATE_COMPLETE`, 서비스 상태, QGIS 3 worker 작업과 임시 자원 정리까지 통과했습니다.
 - `v0.1.1` 재시험에서는 Let’s Encrypt IP 인증서 발급까지 성공했지만, Nginx 적용 직후의 단일 HTTPS 검사가 실패해 이전 자체서명 인증서로 안전 복구됐습니다.
 - `v0.1.2` 재시험에서는 Let’s Encrypt 공인 IP 인증서 적용, 신뢰된 HTTPS 확인과 자동 갱신 timer 설치까지 성공했습니다. 이후 `create_project`의 `Get Project Seed` 단계에서 worker 내부 요청의 `Host: nginx`가 공식 Nginx 보호 규칙에 의해 응답 없이 종료되어 실패했고, 자동 진단자료 보존은 정상 동작했습니다.
-- `v0.1.4`는 검증된 `v0.1.3` 설치 코드에 Let’s Encrypt 공인 IP 인증서 기본값과 명시적 약관 동의 게이트를 적용한 새 artifact이며, 실제 AWS 재시험 전입니다.
+- 2026-08-25 `v0.1.4` 기본 Let’s Encrypt 경로는 서울 리전의 새 AWS 스택에서 `CREATE_COMPLETE`, 공인 IP 인증서 신뢰·주소 일치, HTTPS 로그인 이동, 상태 API와 설치 완료 gate까지 통과했습니다. 이번 회차는 CloudShell 생성 경로였으며 브라우저 파일 업로드 화면과 시간 경과 인증서 갱신은 다시 시험하지 않았습니다. 자세한 값과 한계는 [실제 AWS 검증 기록](docs/verification/lab-lightsail-v0.1.4-2026-08-25.md)에 있습니다.
 - `medium_3_0` 상품과 `ap-northeast-2a`의 현재 계정별 가용성은 생성 시점에 달라질 수 있습니다.
 - 기존 식물이력관리용 PostGIS 데이터베이스에는 연결하거나 변경하지 않습니다.
 

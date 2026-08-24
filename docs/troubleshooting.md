@@ -8,7 +8,7 @@
 - 실패한 설치를 무작정 반복하지 않습니다. 같은 이름의 자원 충돌과 추가 비용이 생길 수 있습니다.
 - 이 파일럿에는 자동 스냅샷과 애플리케이션 백업이 없습니다. 삭제나 교체는 데이터를 영구 손실시킬 수 있습니다.
 
-> 2026-08-24 `v0.1.3` 자체서명 재시험은 수정된 worker 내부 API를 포함해 CloudFormation `CREATE_COMPLETE`까지 통과했습니다. Let’s Encrypt를 기본으로 바꾼 `v0.1.4`의 공인 인증서·worker 결합 경로는 실제 AWS 재시험 전입니다.
+> 2026-08-24 `v0.1.3` 자체서명 시험과 2026-08-25 `v0.1.4` 기본 Let’s Encrypt 시험은 수정된 worker 내부 API를 포함해 각각 CloudFormation `CREATE_COMPLETE`까지 통과했습니다. `v0.1.4`의 직접 관찰값과 아직 미검증인 범위는 [실제 AWS 검증 기록](verification/lab-lightsail-v0.1.4-2026-08-25.md)에 있습니다.
 
 ## 설치 파일이 내려받아지지 않음
 
@@ -78,7 +78,7 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 
 설치기는 공인 인증서를 Nginx에 적용한 뒤 최대 60초 동안 새 인증서 지문과 신뢰된 HTTPS 응답을 다시 확인합니다. 각 시도의 마지막 결과는 root만 읽을 수 있는 `/opt/qfieldcloud/state/certbot-log/last-validation.log`에 저장합니다. `status`, `expected_fingerprint`, `observed_fingerprint`, `openssl_exit`, `curl_exit`을 확인하면 새 인증서 전환 지연과 TLS 신뢰 오류를 구분할 수 있습니다. 이 파일에는 개인키를 기록하지 않지만, 공유하기 전 공개 IP 등 운영 식별정보를 가립니다.
 
-공인 IP 인증서 발급, Nginx 적용과 신뢰된 HTTPS 응답은 실제 AWS에서 확인했습니다. 설치 완료와 시간 경과 자동 갱신까지는 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
+`v0.1.4`에서 공인 IP 인증서 발급, Nginx 적용, 신뢰된 HTTPS 응답과 전체 설치 완료를 실제 AWS에서 확인했습니다. 설치 완료 gate는 갱신 timer가 enabled·active임을 확인했지만 시간 경과 후 실제 갱신은 아직 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
 
 ## 데이터베이스, 저장소 또는 worker 오류
 

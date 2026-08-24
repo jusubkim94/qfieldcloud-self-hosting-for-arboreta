@@ -2,7 +2,7 @@
 
 기본 설치 방법은 GitHub에 보관된 완성 템플릿을 PC로 내려받아 AWS CloudFormation에 직접 업로드하는 방식입니다. 공개 S3 버킷, Git, PowerShell, AWS CLI와 Access Key는 필요하지 않습니다.
 
-> 2026-08-24 `v0.1.3` 자체서명 시험은 수정된 worker 내부 API를 포함해 `CREATE_COMPLETE`까지 통과했습니다. Let’s Encrypt 공인 IP 인증서가 기본인 `v0.1.4`의 재시험과 성공 스택 삭제는 아직 남아 있습니다. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
+> 2026-08-24 `v0.1.3` 자체서명 시험과 2026-08-25 `v0.1.4` 기본 Let’s Encrypt 시험은 수정된 worker 내부 API를 포함해 각각 `CREATE_COMPLETE`까지 통과했습니다. `v0.1.4` 시험은 CloudShell 생성 경로였으므로 아래 브라우저 파일 업로드 화면은 이번 회차에 다시 시험하지 않았습니다. [검증 기록](../verification/lab-lightsail-v0.1.4-2026-08-25.md)에서 범위를 확인하세요. 아래 작업은 월 최대 US$24인 Lightsail 서버를 만들 수 있습니다.
 
 ## 시작 전 확인
 

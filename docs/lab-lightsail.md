@@ -55,8 +55,9 @@ flowchart LR
 
 - 정적 검사 완료: CloudFormation, PowerShell, Bash, 고정 이미지 digest, 릴리스 해시와 문서 링크
 - 완료 검증: `v0.1.3` 자체서명 경로의 새 AWS 스택 생성, 서비스·QGIS worker 확인과 `CREATE_COMPLETE`
-- 부분 검증: 과거 공인 IP 인증서 발급·Nginx 적용·신뢰된 HTTPS와 갱신 timer 설치
-- 아직 미검증: `v0.1.4` 기본 공인 인증서와 수정된 worker 경로를 함께 사용한 생성·확인·삭제 전체 과정
+- 완료 검증: `v0.1.4` 기본 Let’s Encrypt 경로의 CloudShell 스택 생성, `CREATE_COMPLETE`, 공인 IP 인증서 외부 신뢰·주소 일치, HTTPS와 상태 API. 자세한 근거는 [실제 AWS 검증 기록](verification/lab-lightsail-v0.1.4-2026-08-25.md)에 있습니다.
+- 설치 완료 gate 근거: 인증서 fingerprint 일치, 갱신 timer enabled·active와 worker 통과. 이번 회차에 별도 SSH 명령으로 재실행한 결과는 아닙니다.
+- 아직 미검증: 시간 경과 후 실제 인증서 갱신, 실패 시 `DO_NOTHING` 자원 보존 동작, `v0.1.4` 브라우저 파일 업로드 화면과 성공 스택 삭제
 - 생성 시 달라질 수 있음: `medium_3_0`과 `ap-northeast-2a`의 계정별 가용성
 
 관리자가 여러 사용자에게 한 번 클릭 링크를 제공해야 할 때만 [선택적 S3 게시 절차](release-publishing.md)를 사용할 수 있습니다. 일반 사용자의 기본 설치에는 필요하지 않습니다.
