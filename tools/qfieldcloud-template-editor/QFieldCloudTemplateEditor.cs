@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Offline GUI editor for the unofficial QFieldCloud lab-lightsail CloudFormation template")]
 [assembly: AssemblyCompany("qfieldcloud-self-hosting-for-arboreta contributors")]
 [assembly: AssemblyProduct("QFieldCloud Standalone Template Editor")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
+[assembly: AssemblyFileVersion("0.1.1.0")]
 
 namespace QFieldCloudTemplateEditor
 {
@@ -346,7 +346,7 @@ namespace QFieldCloudTemplateEditor
                 "2  GUI에서 설정 변경 · 검증",
                 "3  새 template.yaml 저장",
                 "4  AWS Console · Region 선택",
-                "5  CloudFormation에 YAML 업로드",
+                "5  YAML 업로드 · 실패 보존 선택",
                 "6  Lightsail · Static IP 생성",
                 "7  bootstrap · Docker · QFieldCloud 설치",
                 "8  health + QGIS worker 검사",
@@ -457,7 +457,7 @@ namespace QFieldCloudTemplateEditor
 
         public MainForm()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.0";
+            Text = "QFieldCloud Standalone Template Editor v0.1.1";
             Width = 1220;
             Height = 850;
             MinimumSize = new Size(980, 720);
@@ -474,7 +474,7 @@ namespace QFieldCloudTemplateEditor
             MainMenuStrip = (MenuStrip)Controls[Controls.Count - 2];
 
             string initial = TemplateEngine.LoadEmbeddedTemplate();
-            SetDocument(initial, "내장 검증본 v0.1.0", false);
+            SetDocument(initial, "내장 검증본 v0.1.1", false);
         }
 
         public void RenderTestScreenshots(string outputDirectory)
@@ -541,7 +541,7 @@ namespace QFieldCloudTemplateEditor
             tools.DropDownItems.Add("현재 YAML 검증", null, delegate { ValidateCurrent(true); });
             ToolStripMenuItem help = new ToolStripMenuItem("도움말(&H)");
             help.DropDownItems.Add("앱 정보", null, delegate { MessageBox.Show(this,
-                "QFieldCloud Standalone Template Editor v0.1.0\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
+                "QFieldCloud Standalone Template Editor v0.1.1\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
                 "앱 정보", MessageBoxButtons.OK, MessageBoxIcon.Information); });
             menu.Items.Add(file);
             menu.Items.Add(tools);
@@ -721,11 +721,12 @@ namespace QFieldCloudTemplateEditor
                 "2. GUI에서 Region, Availability Zone, instance 이름, Lightsail bundle과 인증서 방식을 설정합니다.\n" +
                 "3. 검증을 통과한 새 template.yaml을 저장합니다. 앱은 AWS에 접속하지 않습니다.\n" +
                 "4. AWS Console에서 대상 Region을 선택하고 CloudFormation → Create stack → Upload a template file로 YAML을 올립니다.\n" +
-                "5. Submit을 누르면 비용이 발생할 수 있습니다. CloudFormation이 Lightsail와 Static IP를 생성합니다.\n" +
-                "6. UserData가 고정 commit의 bootstrap.sh를 내려받고 SHA-256이 맞는 경우에만 실행합니다.\n" +
-                "7. Docker, QFieldCloud, PostgreSQL/PostGIS, RustFS, Nginx와 QGIS worker를 설치합니다.\n" +
-                "8. service health check와 QGIS worker smoke test를 모두 통과해야 CloudFormation에 성공 신호를 보냅니다.\n" +
-                "9. Stack 상태가 CREATE_COMPLETE가 되면 Outputs → HttpsUrl로 접속합니다.\n\n" +
+                "5. Configure stack options → Stack failure options에서 Preserve successfully provisioned resources를 직접 선택합니다. 이 실행 옵션은 YAML이나 앱이 자동 선택할 수 없습니다.\n" +
+                "6. Submit을 누르면 비용이 발생할 수 있습니다. CloudFormation이 Lightsail와 Static IP를 생성합니다.\n" +
+                "7. UserData가 고정 commit의 bootstrap.sh를 내려받고 SHA-256이 맞는 경우에만 실행합니다.\n" +
+                "8. Docker, QFieldCloud, PostgreSQL/PostGIS, RustFS, Nginx와 QGIS worker를 설치합니다.\n" +
+                "9. service health check와 QGIS worker smoke test를 모두 통과해야 CloudFormation에 성공 신호를 보냅니다.\n" +
+                "10. Stack 상태가 CREATE_COMPLETE가 되면 Outputs → HttpsUrl로 접속합니다. 실패한 경우 보존된 서버의 root 전용 진단 로그를 확인합니다.\n\n" +
                 "삭제: CloudFormation에서 stack을 삭제하고 Lightsail instance와 분리된 Static IP가 남지 않았는지 확인합니다. 삭제된 데이터는 복구할 수 없습니다."));
             page.Controls.Add(split);
             return page;
@@ -1040,7 +1041,7 @@ namespace QFieldCloudTemplateEditor
         private void ResetToEmbedded()
         {
             if (!ConfirmDiscard()) return;
-            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.0", false);
+            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.1", false);
         }
 
         private bool ConfirmDiscard()
@@ -1056,7 +1057,7 @@ namespace QFieldCloudTemplateEditor
 
         private void UpdateTitle()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.0" + (dirty ? " *" : "") + " — " + currentPath;
+            Text = "QFieldCloud Standalone Template Editor v0.1.1" + (dirty ? " *" : "") + " — " + currentPath;
         }
     }
 }
