@@ -420,6 +420,7 @@ $readmeUploadIndex = $readmeText.IndexOf('Upload a template file', [StringCompar
 $readmeCompleteIndex = $readmeText.IndexOf('`CREATE_COMPLETE`', [StringComparison]::Ordinal)
 $readmeCredentialsIndex = $readmeText.IndexOf('show-admin-credentials.sh', [StringComparison]::Ordinal)
 $readmePasswordChangeIndex = $readmeText.IndexOf('Change password', [StringComparison]::Ordinal)
+$readmeClientConnectionIndex = $readmeText.IndexOf('## QFieldSync와 QField 앱을 이 서버에 연결하기', [StringComparison]::Ordinal)
 $readmeOptionalSettingsIndex = $readmeText.IndexOf('## 선택: 설치 설정을 바꾸고 싶다면', [StringComparison]::Ordinal)
 Assert-Contract (
     $readmeDownloadIndex -ge 0 -and
@@ -427,14 +428,20 @@ Assert-Contract (
     $readmeCompleteIndex -gt $readmeUploadIndex -and
     $readmeCredentialsIndex -gt $readmeCompleteIndex -and
     $readmePasswordChangeIndex -gt $readmeCredentialsIndex -and
-    $readmeOptionalSettingsIndex -gt $readmePasswordChangeIndex -and
+    $readmeClientConnectionIndex -gt $readmePasswordChangeIndex -and
+    $readmeOptionalSettingsIndex -gt $readmeClientConnectionIndex -and
     $readmeText.Contains('오른쪽 위의 사용자 이름 `qfcadmin`') -and
     $readmeText.Contains('**Old password**') -and
     $readmeText.Contains('**New password confirmation**') -and
     $readmeText.Contains('최초 비밀번호는 더 이상 로그인에 사용할 수 없지만') -and
     $readmeText.Contains('SSH 명령은 이후에도 최초 비밀번호를 표시합니다') -and
-    $readmeText.Contains('`/admin/password_change/`')
-) 'README must keep the beginner install, first-login, and password-change steps in order and explain that the helper only shows the initial password.'
+    $readmeText.Contains('`/admin/password_change/`') -and
+    $readmeText.Contains('https://docs.qfield.org/get-started/tutorials/get-started-qfc/') -and
+    $readmeText.Contains('https://docs.qfield.org/get-started/tutorials/advanced-setup-qfc/#connect-to-a-custom-qfieldcloud-server-in-qfield-and-qfieldsync') -and
+    $readmeText.Contains('Nyuki 아이콘(QFieldCloud 로고)') -and
+    $readmeText.Contains('`app.qfield.cloud`에 가입하거나 접속하는 단계는 OPENGIS.ch가 운영하는 공식 호스팅 서비스용') -and
+    $readmeText.Contains('Server URL 뒤에 `/admin/` 또는 `/api/v1/`를 붙이지 마세요')
+) 'README must keep the beginner install, first-login, password-change, and client-connection steps in order with their security boundaries.'
 
 Assert-Contract (
     $verificationText.Contains('`ap-northeast-2` / `ap-northeast-2a`') -and

@@ -27,6 +27,7 @@ flowchart TD
     G --> H[8. 관리자 정보 확인]
     H --> I[9. 최초 로그인]
     I --> J[10. 비밀번호 변경]
+    J --> K[11. QFieldSync·QField 연결]
 ```
 
 1. 위의 초록색 **설치 파일 다운로드** 버튼을 누르고, 받은 ZIP 파일의 압축을 풉니다.
@@ -44,9 +45,40 @@ flowchart TD
 
 9. 명령이 표시한 `URL`을 새 탭에서 엽니다. 인증서 경고가 없어야 합니다. 로그인 화면의 **Username**에는 명령이 표시한 사용자 이름(기본값 `qfcadmin`), **Password**에는 표시된 최초 비밀번호를 입력합니다.
 10. 로그인되면 관리자 화면 오른쪽 위의 사용자 이름 `qfcadmin`을 누르고 **Change password**를 선택합니다. **Old password**에는 방금 로그인한 최초 비밀번호를 넣고, **New password**와 **New password confirmation**에 새 비밀번호를 두 번 입력한 뒤 **Change password** 버튼을 누릅니다. 새 비밀번호는 다른 곳에서 쓰지 않은 값으로 정하고 신뢰할 수 있는 비밀번호 관리자에 저장합니다.
+11. 아래 예시에 따라 QGIS의 QFieldSync와 모바일 QField 앱을 이 서버에 연결합니다. 프로젝트 생성, 업로드와 동기화 같은 이후 사용법은 [QFieldCloud 공식 문서](https://docs.qfield.org/get-started/tutorials/get-started-qfc/)를 따릅니다.
 
 > [!IMPORTANT]
 > SSH 명령은 서버 설치 때 만든 **최초 생성 비밀번호**만 보여줍니다. 관리자 화면에서 비밀번호를 변경하면 최초 비밀번호는 더 이상 로그인에 사용할 수 없지만, SSH 명령은 이후에도 최초 비밀번호를 표시합니다. 변경한 새 비밀번호는 서버가 대신 보여주지 않으므로 반드시 본인이 안전하게 보관하세요. 비밀번호를 채팅, 파일, GitHub 이슈, 로그 또는 스크린샷에 붙여넣지 마세요.
+
+## QFieldSync와 QField 앱을 이 서버에 연결하기
+
+두 프로그램 모두 기본적으로 공식 서비스인 `app.qfield.cloud`에 연결됩니다. 셀프호스팅 서버를 사용하려면 로그인 화면에서 서버 주소를 한 번 바꿔야 합니다. 공식 설명은 [사용자 지정 QFieldCloud 서버 연결](https://docs.qfield.org/get-started/tutorials/advanced-setup-qfc/#connect-to-a-custom-qfieldcloud-server-in-qfield-and-qfieldsync)을 참고하세요.
+
+공식 문서에서 `app.qfield.cloud`에 가입하거나 접속하는 단계는 OPENGIS.ch가 운영하는 공식 호스팅 서비스용입니다. 그 단계는 건너뛰고, 이 설치에서 만든 자신의 `HttpsUrl`과 계정을 계속 사용하세요.
+
+공통으로 입력할 값은 다음과 같습니다.
+
+- **Server URL**: CloudFormation **Outputs → HttpsUrl**의 값을 그대로 사용합니다. 예를 들어 Output이 `https://3.39.112.39/`라면 이 주소 전체를 입력합니다. 새로 만든 스택은 IP가 다를 수 있으므로 자신의 Output을 사용하세요.
+- **Username**: 기본 관리자 계정은 `qfcadmin`입니다.
+- **Password**: 앞 단계에서 변경하여 비밀번호 관리자에 저장한 새 비밀번호입니다.
+
+Server URL 뒤에 `/admin/` 또는 `/api/v1/`를 붙이지 마세요. QFieldSync와 QField 앱이 입력한 루트 주소에서 필요한 API 경로를 자동으로 사용합니다.
+
+### QGIS의 QFieldSync
+
+1. QGIS에서 **Plugins → Manage and Install Plugins**를 열고 `QFieldSync`를 설치합니다.
+2. QFieldSync 도구 모음의 파란 구름 아이콘을 눌러 로그인 화면을 엽니다.
+3. 로그인 화면의 Nyuki 아이콘(QFieldCloud 로고)을 **빠르게 두 번 클릭**하면 Server URL 입력칸이 나타납니다.
+4. 위의 Server URL, `qfcadmin`, 변경한 새 비밀번호를 입력하여 로그인합니다. QGIS가 처음 비밀번호를 저장할 때 Master Password 설정을 요청할 수 있습니다.
+
+### 모바일 QField 앱
+
+1. QField를 열고 **Cloud Projects** 또는 **QFieldCloud Projects**를 선택하여 로그인 화면을 엽니다.
+2. Nyuki 아이콘(QFieldCloud 로고)을 **빠르게 두 번 탭**하면 Server URL 입력칸이 나타납니다.
+3. QFieldSync에서 사용한 것과 같은 Server URL, `qfcadmin`, 변경한 새 비밀번호를 입력하여 로그인합니다.
+4. QFieldSync에서 서버로 올린 프로젝트가 목록에 나타나면 선택하여 기기에 내려받습니다.
+
+프로젝트 만들기, 업로드, 현장 편집, 충돌 처리와 동기화 방법은 이 저장소에서 다시 설명하지 않고 [QFieldCloud 공식 시작 안내](https://docs.qfield.org/get-started/tutorials/get-started-qfc/)를 기준으로 합니다.
 
 ## 삭제해서 비용 멈추기
 
