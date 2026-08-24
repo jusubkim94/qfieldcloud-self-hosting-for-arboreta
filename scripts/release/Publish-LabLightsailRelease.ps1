@@ -356,7 +356,7 @@ function New-QuickCreateUrl {
         param_DeploymentRegion = 'ap-northeast-2'
         param_AvailabilityZone = 'ap-northeast-2a'
         param_InstanceName = 'qfieldcloud-pilot'
-        param_CertificateMode = 'self-signed'
+        param_CertificateMode = 'letsencrypt-ip'
         param_LetsEncryptTermsAccepted = 'false'
     }
     $encodedReviewParameters = @(

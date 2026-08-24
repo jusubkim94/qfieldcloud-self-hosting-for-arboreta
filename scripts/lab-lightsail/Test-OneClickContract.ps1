@@ -83,6 +83,24 @@ Assert-Contract (
     $templateText.Contains('Default: qfieldcloud-pilot')
 ) 'The one-click template does not pin the validated Seoul Lightsail defaults.'
 
+$certificateParameterBlock = [regex]::Match(
+    $templateText,
+    '(?ms)^  CertificateMode:\r?\n(?<Body>.*?)(?=^  LetsEncryptTermsAccepted:)'
+)
+$termsParameterBlock = [regex]::Match(
+    $templateText,
+    '(?ms)^  LetsEncryptTermsAccepted:\r?\n(?<Body>.*?)(?=^Rules:)'
+)
+Assert-Contract (
+    $certificateParameterBlock.Success -and
+    $certificateParameterBlock.Groups['Body'].Value.Contains('Default: letsencrypt-ip') -and
+    $termsParameterBlock.Success -and
+    $termsParameterBlock.Groups['Body'].Value.Contains("Default: 'false'") -and
+    $termsParameterBlock.Groups['Body'].Value.Contains('https://letsencrypt.org/repository/') -and
+    $templateText.Contains('PublicCertificateTermsMustBeAccepted:') -and
+    $templateText.Contains("Assert: !Equals [!Ref LetsEncryptTermsAccepted, 'true']")
+) "Let’s Encrypt must be the certificate default while agreement remains an explicit user choice."
+
 Assert-Contract (
     -not $templateText.Contains('AWS::IAM::') -and
     -not $templateText.Contains('AddOns:') -and

@@ -37,7 +37,7 @@ Metadata:
       CertificateMode:
         default: TLS certificate mode
       LetsEncryptTermsAccepted:
-        default: Let’s Encrypt subscriber agreement accepted
+        default: Let’s Encrypt subscriber agreement reviewed and accepted
   Project:
     Name: qfieldcloud-self-hosting-for-arboreta
     Profile: lab-lightsail
@@ -96,7 +96,7 @@ Parameters:
 
   CertificateMode:
     Type: String
-    Default: self-signed
+    Default: letsencrypt-ip
     AllowedValues:
       - self-signed
       - letsencrypt-ip
@@ -112,8 +112,9 @@ Parameters:
       - 'true'
       - 'false'
     Description: >-
-      Must be true for letsencrypt-ip mode. It records acceptance of the Let’s
-      Encrypt Subscriber Agreement; no email address or secret is stored here.
+      Set true only after reviewing the current Let’s Encrypt Subscriber
+      Agreement at https://letsencrypt.org/repository/. It must be true for
+      letsencrypt-ip mode; no email address or secret is stored here.
 
 Rules:
   SeoulRegionMustMatch:
@@ -130,8 +131,8 @@ Rules:
     Assertions:
       - Assert: !Equals [!Ref LetsEncryptTermsAccepted, 'true']
         AssertDescription: >-
-          Accept the Let’s Encrypt Subscriber Agreement before selecting
-          letsencrypt-ip certificate mode.
+          Review the current Let’s Encrypt Subscriber Agreement and explicitly
+          select true before using letsencrypt-ip certificate mode.
 
 Conditions:
   PublicCertificateEnabled: !Equals [!Ref CertificateMode, letsencrypt-ip]

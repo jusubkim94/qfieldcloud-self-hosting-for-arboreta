@@ -113,7 +113,7 @@ QFC_TEMPLATE_URL=https://.../template.yaml?versionId=...
 QFC_QUICK_CREATE_URL=https://ap-northeast-2.console.aws.amazon.com/cloudformation/...
 ```
 
-Quick Create URL은 서울 리전, 스택·인스턴스 이름 `qfieldcloud-pilot`, 검증된 `ap-northeast-2a`, 4GB 상품과 자체서명 HTTPS 기본값을 사용합니다. AWS 공식 형식은 [CloudFormation Quick Create 링크](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stacks-quick-create-links.html)에서 확인할 수 있습니다.
+Quick Create URL은 서울 리전, 스택·인스턴스 이름 `qfieldcloud-pilot`, 검증된 `ap-northeast-2a`, 4GB 상품과 Let’s Encrypt 공인 IP 인증서 기본값을 사용합니다. 약관 동의는 자동으로 `true`가 되지 않으며, 사용자가 [현재 Subscriber Agreement](https://letsencrypt.org/repository/)를 읽고 CloudFormation 화면에서 직접 `true`를 선택해야 합니다. AWS 공식 형식은 [CloudFormation Quick Create 링크](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stacks-quick-create-links.html)에서 확인할 수 있습니다.
 
 ## README 버튼 활성화
 
