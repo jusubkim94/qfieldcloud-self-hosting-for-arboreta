@@ -79,6 +79,7 @@ jobs:
           $tests = @(
             'scripts/lab-lightsail/Test-OneClickContract.ps1'
             'scripts/release/Test-LabLightsailReleaseArtifacts.ps1'
+            'tools/qfieldcloud-template-editor/Test-QFieldCloudTemplateEditor.ps1'
           )
           foreach ($test in $tests) {
             & pwsh -NoProfile -File $test
