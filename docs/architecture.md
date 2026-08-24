@@ -2,18 +2,18 @@
 
 ## 목적과 상태
 
-`lab-lightsail`은 개인 담당자가 AWS 웹 콘솔에서 Quick Create 화면을 열고 단일 Lightsail 서버에 QFieldCloud를 설치하는 저비용 파일럿입니다.
+`lab-lightsail`은 개인 담당자가 완성된 YAML 파일을 CloudFormation에 업로드하여 단일 Lightsail 서버에 QFieldCloud를 설치하는 저비용 파일럿입니다.
 
-현재 릴리스별 S3 템플릿과 실제 Quick Create URL은 게시되지 않았습니다. 아래 구조는 구현 목표와 저장소의 현재 설계를 설명하며, 단순화한 경로의 실제 AWS 종단 간 검증 완료를 의미하지 않습니다.
+`v0.1.0` 완성 템플릿은 저장소에 포함되어 있습니다. 아래 구조는 현재 기본 흐름이며 실제 AWS 종단 간 검증 완료를 의미하지는 않습니다.
 
-## 브라우저 원클릭 흐름
+## 브라우저 수동 업로드 흐름
 
 ```mermaid
 flowchart LR
-    User[현재 AWS 콘솔 로그인 주체] --> Launch[GitHub Launch 버튼]
-    Launch --> Quick[CloudFormation Quick Create<br/>서울·qfieldcloud-pilot]
-    Artifact[릴리스별 S3 템플릿<br/>SHA-256 검증] --> Quick
-    Quick --> CFN[CloudFormation 스택]
+    Artifact[GitHub의 릴리스 템플릿<br/>SHA-256 검증] --> Download[사용자 PC로 다운로드]
+    User[현재 AWS 콘솔 로그인 주체] --> Upload[CloudFormation 파일 업로드<br/>서울·qfieldcloud-pilot]
+    Download --> Upload
+    Upload --> CFN[CloudFormation 스택]
     CFN --> LS[Lightsail 4GB 인스턴스]
     CFN --> IP[static IP]
     CFN --> Alarm[상태 경보]

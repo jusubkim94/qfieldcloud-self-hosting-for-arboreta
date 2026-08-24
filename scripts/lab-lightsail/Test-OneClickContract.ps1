@@ -39,6 +39,9 @@ $renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
 $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
+$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
+$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/manifest.json'
+$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/SHA256SUMS'
 
 $removedPaths = @(
     'infra/lab-lightsail/access-bootstrap.yaml'
@@ -246,10 +249,36 @@ foreach ($markdownFile in $markdownFiles) {
     }
 }
 
-Assert-Contract (
-    $readmeText.Contains('Launch QFieldCloud on AWS') -and
-    $readmeText.Contains('S3 게시 전') -and
-    -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
-) 'README must keep the Launch button visibly disabled until a verified S3 URL is published.'
+foreach ($releasePath in @($releaseTemplatePath, $releaseManifestPath, $releaseChecksumsPath)) {
+    Assert-Contract (Test-Path -LiteralPath $releasePath -PathType Leaf) "Missing downloadable release file: $releasePath"
+}
 
-Write-Output 'One-click Lightsail static contract validation passed. AWS and S3 were not called.'
+$releaseTemplateText = Get-Content -Raw -LiteralPath $releaseTemplatePath
+$releaseManifest = Get-Content -Raw -LiteralPath $releaseManifestPath | ConvertFrom-Json
+$releaseChecksums = Get-Content -Raw -LiteralPath $releaseChecksumsPath
+$releaseTemplateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseTemplatePath).Hash.ToLowerInvariant()
+Assert-Contract (
+    $releaseManifest.release_version -eq 'v0.1.0' -and
+    $releaseManifest.source_revision -eq '094c0662364ab96d6523bd1a2fbdf7e012d16948' -and
+    $releaseManifest.template.sha256 -eq $releaseTemplateHash -and
+    $releaseTemplateHash -eq '506c2c77bcd0c50907c28777151a7256f5541b45c4d66ec7cee0a5164e4fc539' -and
+    $releaseChecksums.Contains("$releaseTemplateHash  template.yaml")
+) 'The committed v0.1.0 release manifest or checksum does not match template.yaml.'
+Assert-Contract (
+    -not $releaseTemplateText.Contains($zeroRevision) -and
+    -not $releaseTemplateText.Contains($zeroChecksum) -and
+    -not $releaseTemplateText.Contains('__RELEASE_VERSION__') -and
+    $releaseTemplateText.Contains($releaseManifest.source_revision) -and
+    $releaseTemplateText.Contains($releaseManifest.bootstrap.sha256)
+) 'The downloadable release template still has placeholders or does not match its manifest.'
+
+$downloadUrl = 'https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/raw/refs/heads/main/releases/lab-lightsail/v0.1.0/template.yaml'
+Assert-Contract (
+    $readmeText.Contains($downloadUrl) -and
+    $readmeText.Contains('Upload a template file') -and
+    $readmeText.Contains('```mermaid') -and
+    $readmeText.Contains('수동 파일 업로드 방식으로 실제 새 AWS 스택을 만들고 삭제하는 종단 간 시험은 아직 수행하지 않았습니다.') -and
+    -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
+) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
+
+Write-Output 'Manual-download Lightsail static contract validation passed. AWS and S3 were not called.'

@@ -8,27 +8,24 @@
 - 실패한 설치를 무작정 반복하지 않습니다. 같은 이름의 자원 충돌과 추가 비용이 생길 수 있습니다.
 - 이 파일럿에는 자동 스냅샷과 애플리케이션 백업이 없습니다. 삭제나 교체는 데이터를 영구 손실시킬 수 있습니다.
 
-> 현재 릴리스별 S3 템플릿과 Quick Create URL은 게시되지 않았고, 단순화한 전체 흐름은 실제 AWS에서 아직 검증하지 않았습니다.
+> `v0.1.0` 완성 템플릿은 다운로드할 수 있지만 수동 업로드 전체 흐름은 실제 AWS에서 아직 종단 간 검증하지 않았습니다.
 
-## Launch 버튼을 사용할 수 없음
+## 설치 파일이 내려받아지지 않음
 
-현재는 정상적인 제한입니다. 프로젝트가 다음 조건을 모두 확인하기 전에는 버튼을 활성화하면 안 됩니다.
+1. README의 초록색 **QFieldCloud 설치 파일 다운로드** 버튼을 다시 누릅니다.
+2. GitHub 로그인이나 브라우저 다운로드 차단 알림이 있는지 확인합니다.
+3. 계속 실패하면 [`releases/lab-lightsail/v0.1.0/template.yaml`](../releases/lab-lightsail/v0.1.0/template.yaml)을 열고 오른쪽 위 다운로드 버튼을 누릅니다.
+4. 파일 이름이 `template.yaml`이고 빈 파일이 아닌지 확인합니다.
 
-1. 릴리스별 `template.yaml`, `manifest.json`, `SHA256SUMS` 생성
-2. S3 Versioning이 켜진 고정 경로에 게시
-3. 게시 객체의 SHA-256, 길이와 `VersionId` 재검증
-4. 익명으로 템플릿을 읽을 수 있는지 확인
-5. 해당 객체 버전을 가리키는 Quick Create URL 생성
+`infra/lab-lightsail/template.yaml`은 자리표시자가 있는 원본 틀이므로 업로드하지 않습니다.
 
-저장소 원본 템플릿을 직접 업로드하거나 임의의 S3 URL을 대신 사용하지 않습니다.
-
-## Quick Create 화면이 열리지 않음
+## CloudFormation 생성 화면을 사용할 수 없음
 
 1. 현재 로그인한 AWS 계정과 주체를 확인합니다.
 2. root 사용자라면 MFA가 켜져 있는지 확인하고 root Access Key는 만들지 않습니다.
 3. 현재 주체에 CloudFormation 스택과 템플릿이 정의한 Lightsail 자원을 만들고 조회하고 삭제할 권한이 있는지 AWS 관리자에게 확인합니다.
 4. 별도 IAM 사용자나 역할, 로컬 AWS 프로필 또는 Access Key를 새로 만들어 우회하지 않습니다.
-5. 브라우저의 URL이 프로젝트가 공개한 고정 S3 `versionId`를 포함하는지 확인합니다.
+5. **Choose an existing template → Upload a template file** 경로를 사용했는지 확인합니다.
 
 권한 오류 해결을 위해 전체 관리자 권한을 임의로 추가하지 않습니다.
 
