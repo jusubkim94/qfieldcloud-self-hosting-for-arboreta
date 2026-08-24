@@ -1,8 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Unofficial QFieldCloud lab pilot on one Amazon Lightsail instance in Seoul.
-  Creates a 4 GB instance, static IP, restricted firewall, optional automatic
-  snapshots, and optional Lightsail alarms. No secret value is accepted here.
+  Unofficial single-server QFieldCloud pilot in AWS Seoul. Creates a billable
+  4 GB Lightsail instance (official plan price checked 2026-08-24: USD 24/month
+  before tax and overage), a static IP, a restricted firewall, and one basic
+  status alarm. THERE IS NO BACKUP OR SNAPSHOT: deleting the stack or server
+  permanently loses its data. Use an MFA-protected AWS sign-in, never create a
+  root access key, and launch only a reviewed release-specific template.
 
 Metadata:
   cfn-lint:
@@ -14,31 +17,13 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Seoul deployment
+          default: One-click pilot settings
         Parameters:
           - DeploymentRegion
           - AvailabilityZone
           - InstanceName
-          - BlueprintId
-          - BundleId
           - CertificateMode
           - LetsEncryptTermsAccepted
-      - Label:
-          default: Pinned bootstrap source
-        Parameters:
-          - RepositoryOwner
-          - RepositoryName
-          - BootstrapPath
-          - BootstrapRevision
-          - BootstrapSha256
-      - Label:
-          default: Recovery and monitoring
-        Parameters:
-          - EnableAutomaticSnapshots
-          - AutomaticSnapshotTimeUtc
-          - EnableAlarms
-          - CpuAlarmThresholdPercent
-          - SshAccessMode
     ParameterLabels:
       DeploymentRegion:
         default: AWS Region (must match the console Region)
@@ -46,30 +31,6 @@ Metadata:
         default: Lightsail Availability Zone
       InstanceName:
         default: Lightsail instance name
-      BlueprintId:
-        default: Ubuntu 24.04 blueprint ID
-      BundleId:
-        default: 4 GB Lightsail bundle ID
-      RepositoryOwner:
-        default: GitHub repository owner
-      RepositoryName:
-        default: GitHub repository name
-      BootstrapPath:
-        default: Bootstrap path in the repository
-      BootstrapRevision:
-        default: Pinned repository commit (40 hexadecimal characters)
-      BootstrapSha256:
-        default: Bootstrap file SHA-256 (64 hexadecimal characters)
-      EnableAutomaticSnapshots:
-        default: Enable daily automatic snapshots
-      AutomaticSnapshotTimeUtc:
-        default: Daily snapshot start time (UTC)
-      EnableAlarms:
-        default: Create status-check and CPU alarms
-      CpuAlarmThresholdPercent:
-        default: High CPU threshold (%)
-      SshAccessMode:
-        default: Port 22 access
       CertificateMode:
         default: TLS certificate mode
       LetsEncryptTermsAccepted:
@@ -80,15 +41,22 @@ Metadata:
     OfficialProject: false
   SecurityNotes:
     - This template has no password, token, access key, private key, or dynamic secret reference.
+    - Root users are not blocked, but MFA must be enabled and root access keys must never be created.
+    - The caller must already be allowed to create CloudFormation and Lightsail resources.
     - Port 22 is restricted to the AWS-managed lightsail-connect browser SSH alias.
     - UserData downloads a file first, verifies SHA-256, and only then executes it.
     - Bootstrap output is written to a root-only file instead of the CloudFormation output.
     - A stack-local wait handle gates completion and is never emitted as an output or log value.
     - Public certificate mode exposes only the existing HTTP port 80 challenge path and stores ACME state root-only.
+  CostAndDataWarnings:
+    - This stack creates billable AWS resources. Delete the stack to stop instance charges.
+    - Automatic snapshots and application backup or restore jobs are deliberately absent.
+    - Deleting the stack, instance, or disk permanently loses all pilot data.
+    - A failed stack can retain resources until rollback or deletion finishes; inspect both CloudFormation and Lightsail.
   UpdateNotes:
-    - This pilot installer supports creating a new stack only; its deployment script rejects an existing stack name.
+    - This pilot installer supports creating a new stack only.
     - In-place changes to Lightsail instance properties are not a supported update path for this pilot.
-    - Create a reviewed replacement stack only after backing up data and approving the added cost.
+    - There is no built-in data recovery path. Export important data before any replacement.
 
 Parameters:
   DeploymentRegion:
@@ -111,7 +79,7 @@ Parameters:
 
   InstanceName:
     Type: String
-    Default: qfieldcloud-lab-pilot
+    Default: qfieldcloud-pilot
     MinLength: 3
     MaxLength: 64
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9]$'
@@ -121,22 +89,6 @@ Parameters:
     Description: >-
       Physical name for a new create-only pilot stack. It must not already be
       in use; this installer does not update or replace an existing instance.
-
-  BlueprintId:
-    Type: String
-    Default: ubuntu_24_04
-    AllowedValues:
-      - ubuntu_24_04
-    Description: >-
-      AWS Lightsail Ubuntu 24.04 blueprint identifier. The deployment preflight
-      must confirm this identifier is active in ap-northeast-2.
-
-  BundleId:
-    Type: String
-    Default: medium_3_0
-    AllowedValues:
-      - medium_3_0
-    Description: Lightsail Linux bundle with 4 GB RAM for the lab pilot.
 
   CertificateMode:
     Type: String
@@ -159,96 +111,6 @@ Parameters:
       Must be true for letsencrypt-ip mode. It records acceptance of the Let’s
       Encrypt Subscriber Agreement; no email address or secret is stored here.
 
-  RepositoryOwner:
-    Type: String
-    Default: jusubkim94
-    MinLength: 1
-    MaxLength: 39
-    AllowedPattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$'
-    ConstraintDescription: Use a valid GitHub owner name without a URL or slash.
-    Description: Public GitHub owner hosting the pinned bootstrap revision.
-
-  RepositoryName:
-    Type: String
-    Default: qfieldcloud-self-hosting-for-arboreta
-    MinLength: 1
-    MaxLength: 100
-    AllowedPattern: '^[A-Za-z0-9._-]+$'
-    ConstraintDescription: Use a GitHub repository name without a URL or slash.
-    Description: Public GitHub repository hosting the pinned bootstrap revision.
-
-  BootstrapPath:
-    Type: String
-    Default: scripts/lab-lightsail/bootstrap.sh
-    AllowedValues:
-      - scripts/lab-lightsail/bootstrap.sh
-    Description: Fixed repository-relative bootstrap path; parent traversal is not allowed.
-
-  BootstrapRevision:
-    Type: String
-    MinLength: 40
-    MaxLength: 40
-    AllowedPattern: '^[0-9a-f]{40}$'
-    ConstraintDescription: Enter a full lowercase 40-character Git commit SHA.
-    Description: >-
-      Required immutable Git commit. Branch names and moving tags are rejected.
-      This value is public provenance, not a secret.
-
-  BootstrapSha256:
-    Type: String
-    MinLength: 64
-    MaxLength: 64
-    AllowedPattern: '^[0-9a-f]{64}$'
-    ConstraintDescription: Enter a lowercase 64-character SHA-256 checksum.
-    Description: >-
-      Required SHA-256 of BootstrapPath at BootstrapRevision. UserData exits
-      without executing the file when this value does not match.
-
-  EnableAutomaticSnapshots:
-    Type: String
-    Default: 'true'
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Description: >-
-      Enables Lightsail daily automatic snapshots. Snapshots add storage cost
-      and can remain billable after this setting is disabled.
-
-  AutomaticSnapshotTimeUtc:
-    Type: String
-    Default: '18:00'
-    AllowedPattern: '^(?:[01][0-9]|2[0-3]):00$'
-    ConstraintDescription: Use an hourly UTC value from 00:00 through 23:00.
-    Description: >-
-      Daily automatic snapshot start time in UTC. 18:00 UTC is 03:00 Korea
-      Standard Time on the following calendar day.
-
-  EnableAlarms:
-    Type: String
-    Default: 'true'
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Description: >-
-      Creates Lightsail StatusCheckFailed and CPUUtilization alarms. Alarm
-      notifications remain disabled until a verified contact is configured.
-
-  CpuAlarmThresholdPercent:
-    Type: Number
-    Default: 80
-    MinValue: 1
-    MaxValue: 100
-    Description: CPU utilization percentage that triggers the high CPU alarm.
-
-  SshAccessMode:
-    Type: String
-    Default: lightsail-connect
-    AllowedValues:
-      - lightsail-connect
-    Description: >-
-      Allows port 22 only from the AWS-managed browser SSH alias. The pilot
-      requires this recovery path because initial credentials stay on the server.
-
 Rules:
   SeoulRegionMustMatch:
     Assertions:
@@ -259,19 +121,6 @@ Rules:
           Open CloudFormation in Asia Pacific (Seoul), ap-northeast-2. Changing
           the DeploymentRegion field does not change the console Region.
 
-  BootstrapInputsMustBePinned:
-    Assertions:
-      - Assert: !Not
-          - !Equals
-            - !Ref BootstrapRevision
-            - '0000000000000000000000000000000000000000'
-        AssertDescription: Replace the all-zero placeholder with a verified Git commit SHA.
-      - Assert: !Not
-          - !Equals
-            - !Ref BootstrapSha256
-            - '0000000000000000000000000000000000000000000000000000000000000000'
-        AssertDescription: Replace the all-zero placeholder with the verified file SHA-256.
-
   PublicCertificateTermsMustBeAccepted:
     RuleCondition: !Equals [!Ref CertificateMode, letsencrypt-ip]
     Assertions:
@@ -281,9 +130,15 @@ Rules:
           letsencrypt-ip certificate mode.
 
 Conditions:
-  AutomaticSnapshotsEnabled: !Equals [!Ref EnableAutomaticSnapshots, 'true']
-  AlarmsEnabled: !Equals [!Ref EnableAlarms, 'true']
   PublicCertificateEnabled: !Equals [!Ref CertificateMode, letsencrypt-ip]
+
+# These sentinel values are replaced only by the release artifact builder.
+# The repository template is not a deployable URL; the published, checksummed
+# S3 object contains a real immutable commit and matching bootstrap checksum.
+Mappings:
+  ReleasePins:
+    Current:
+      ArtifactVersion: '__RELEASE_VERSION__'
 
 Resources:
   BootstrapWaitHandle:
@@ -294,14 +149,8 @@ Resources:
     Properties:
       InstanceName: !Ref InstanceName
       AvailabilityZone: !Ref AvailabilityZone
-      BlueprintId: !Ref BlueprintId
-      BundleId: !Ref BundleId
-      AddOns: !If
-        - AutomaticSnapshotsEnabled
-        - - AddOnType: AutoSnapshot
-            AutoSnapshotAddOnRequest:
-              SnapshotTimeOfDay: !Ref AutomaticSnapshotTimeUtc
-        - !Ref 'AWS::NoValue'
+      BlueprintId: ubuntu_24_04
+      BundleId: medium_3_0
       Networking:
         Ports:
           - FromPort: 80
@@ -348,10 +197,10 @@ Resources:
 
         readonly state_dir='/var/lib/qfieldcloud-bootstrap'
         readonly install_root='/opt/qfieldcloud'
-        readonly repository_url='https://github.com/${RepositoryOwner}/${RepositoryName}.git'
-        readonly revision='${BootstrapRevision}'
-        readonly expected_sha256='${BootstrapSha256}'
-        readonly raw_url='https://raw.githubusercontent.com/${RepositoryOwner}/${RepositoryName}/${BootstrapRevision}/${BootstrapPath}'
+        readonly repository_url='https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta.git'
+        readonly revision='0000000000000000000000000000000000000000'
+        readonly expected_sha256='0000000000000000000000000000000000000000000000000000000000000000'
+        readonly raw_url='https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/0000000000000000000000000000000000000000/scripts/lab-lightsail/bootstrap.sh'
         readonly bootstrap_file="$state_dir/bootstrap.sh"
         readonly bootstrap_log="$state_dir/bootstrap.log"
         readonly bootstrap_timeout_seconds='6000'
@@ -570,7 +419,6 @@ Resources:
 
   StatusCheckFailedAlarm:
     Type: AWS::Lightsail::Alarm
-    Condition: AlarmsEnabled
     DependsOn:
       - LightsailInstance
     Properties:
@@ -584,24 +432,6 @@ Resources:
       NotificationTriggers:
         - ALARM
       Threshold: 1
-      TreatMissingData: missing
-
-  HighCpuAlarm:
-    Type: AWS::Lightsail::Alarm
-    Condition: AlarmsEnabled
-    DependsOn:
-      - LightsailInstance
-    Properties:
-      AlarmName: !Sub '${AWS::StackName}-high-cpu'
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      DatapointsToAlarm: 3
-      EvaluationPeriods: 3
-      MetricName: CPUUtilization
-      MonitoredResourceName: !Ref InstanceName
-      NotificationEnabled: false
-      NotificationTriggers:
-        - ALARM
-      Threshold: !Ref CpuAlarmThresholdPercent
       TreatMissingData: missing
 
 Outputs:
@@ -661,12 +491,12 @@ Outputs:
     Value: !Ref CertificateMode
 
   BootstrapRevision:
-    Description: Public Git commit used to retrieve the verified bootstrap file.
-    Value: !Ref BootstrapRevision
+    Description: Immutable public Git commit selected by the release Launch link.
+    Value: '0000000000000000000000000000000000000000'
 
   BootstrapSha256:
     Description: SHA-256 of the bootstrap file verified before execution.
-    Value: !Ref BootstrapSha256
+    Value: '0000000000000000000000000000000000000000000000000000000000000000'
 
   BootstrapValidationData:
     Description: >-
@@ -679,20 +509,31 @@ Outputs:
     Description: Root-only local marker to inspect after connecting to the instance.
     Value: /var/lib/qfieldcloud-bootstrap/SUCCESS
 
-  SshAccessMode:
-    Description: Port 22 is restricted to the Lightsail browser SSH alias.
-    Value: !Ref SshAccessMode
-
-  AutomaticSnapshots:
-    Description: Whether Lightsail automatic snapshots are enabled.
-    Value: !Ref EnableAutomaticSnapshots
-
   StatusCheckAlarmArn:
-    Condition: AlarmsEnabled
     Description: Lightsail StatusCheckFailed alarm ARN; notifications are disabled.
     Value: !GetAtt StatusCheckFailedAlarm.AlarmArn
 
-  HighCpuAlarmArn:
-    Condition: AlarmsEnabled
-    Description: Lightsail CPUUtilization alarm ARN; notifications are disabled.
-    Value: !GetAtt HighCpuAlarm.AlarmArn
+  InstallationStatus:
+    Description: >-
+      If this stack is CREATE_COMPLETE, bootstrap, database migration, service
+      health checks, and the QGIS 3 worker smoke test all passed.
+    Value: installation-complete
+
+  AdministratorCredentials:
+    Description: >-
+      In Lightsail open this instance, choose Connect using SSH, and run the
+      shown command. It prints the secret only in that interactive browser terminal.
+    Value: sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
+
+  DeleteInstructions:
+    Description: Browser-only removal guide pinned to the same installer commit.
+    Value: >-
+      https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/blob/0000000000000000000000000000000000000000/docs/runbooks/uninstall.md
+
+  ReleaseArtifactVersion:
+    Description: Immutable release artifact version used for this stack.
+    Value: !FindInMap [ReleasePins, Current, ArtifactVersion]
+
+  DataProtectionWarning:
+    Description: This pilot deliberately has no backup, restore job, or automatic snapshot.
+    Value: Deleting this stack or its Lightsail disk permanently loses all QFieldCloud data.

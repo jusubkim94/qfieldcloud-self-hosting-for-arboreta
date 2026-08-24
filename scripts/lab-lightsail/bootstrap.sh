@@ -331,7 +331,7 @@ git -C "$installer_root" checkout --quiet --detach --force "$revision"
 
 readonly version_source="$installer_root/config/qfieldcloud-v26.25.env"
 readonly compose_source="$installer_root/runtime/lab-lightsail/compose.yaml"
-helper_names=(health-check.sh show-admin-credentials.sh backup.sh restore-test.sh worker-smoke-test.sh certificate-renew.sh)
+helper_names=(health-check.sh show-admin-credentials.sh worker-smoke-test.sh certificate-renew.sh)
 for required_file in "$version_source" "$compose_source"; do
   if [[ ! -f $required_file ]]; then
     echo "Required installer file is missing: $required_file" >&2
@@ -416,8 +416,6 @@ source_manifest_listing="$(
     runtime/lab-lightsail/compose.yaml \
     scripts/lab-lightsail/health-check.sh \
     scripts/lab-lightsail/show-admin-credentials.sh \
-    scripts/lab-lightsail/backup.sh \
-    scripts/lab-lightsail/restore-test.sh \
     scripts/lab-lightsail/worker-smoke-test.sh \
     scripts/lab-lightsail/certificate-renew.sh
 )"
@@ -1199,57 +1197,10 @@ if [[ $auto_public_host == "true" ]]; then
   fi
 fi
 
-existing_backup_ready="false"
-if [[ -f $state_root/last-backup-path && ! -L $state_root/last-backup-path && \
-      -f $state_root/last-backup-at && ! -L $state_root/last-backup-at ]]; then
-  existing_backup_path="$(<"$state_root/last-backup-path")"
-  existing_backup_at="$(<"$state_root/last-backup-at")"
-  existing_backup_epoch="$(date --date="$existing_backup_at" +%s 2>/dev/null || true)"
-  current_epoch="$(date -u +%s)"
-  existing_backup_artifacts_ready="true"
-  for backup_artifact in \
-    data/database.dump data/object-storage.tar.gz data/media.tar.gz \
-    sensitive/secrets.env versions.env compose.yaml public-host manifest.json SHA256SUMS; do
-    if [[ ! -s $existing_backup_path/$backup_artifact ]] || \
-      [[ -L $existing_backup_path/$backup_artifact ]]; then
-      existing_backup_artifacts_ready="false"
-      break
-    fi
-  done
-  if [[ $existing_backup_path =~ ^/[A-Za-z0-9._/-]+$ ]] && \
-    [[ $existing_backup_path != *"//"* ]] && \
-    [[ $existing_backup_path != *"/./"* ]] && \
-    [[ $existing_backup_path != *"/../"* ]] && \
-    [[ $existing_backup_at =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] && \
-    [[ $existing_backup_epoch =~ ^[0-9]+$ ]] && \
-    ((current_epoch >= existing_backup_epoch)) && \
-    ((current_epoch - existing_backup_epoch <= 604800)) && \
-    [[ $existing_backup_artifacts_ready == "true" ]] && \
-    [[ -d $existing_backup_path && ! -L $existing_backup_path ]] && \
-    [[ -f $existing_backup_path/manifest.json && ! -L $existing_backup_path/manifest.json ]] && \
-    jq -e \
-      --arg release "$QFIELDCLOUD_RELEASE" \
-      --arg commit "$QFIELDCLOUD_COMMIT" \
-      '.scope == "qfieldcloud-system-only" and .release == $release and
-       .upstream_commit == $commit' \
-      "$existing_backup_path/manifest.json" >/dev/null 2>&1; then
-    existing_backup_ready="true"
-  fi
-fi
-if [[ $existing_backup_ready != "true" ]]; then
-  echo "Creating the initial root-only local pilot backup."
-  "$install_root/bin/backup.sh"
-else
-  echo "Reusing the current release-matched local backup; no duplicate backup was created."
-fi
-
-echo "Running an isolated schema and storage integrity restore test."
-"$install_root/bin/restore-test.sh"
-
 write_bootstrap_state validating
 echo "Installation-gate health-check JSON:"
 if ! "$install_root/bin/health-check.sh" --installation-gate; then
-  echo "The complete service, worker, backup, and restore validation gate failed." >&2
+  echo "The complete service and worker validation gate failed." >&2
   exit 1
 fi
 

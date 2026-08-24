@@ -1,0 +1,255 @@
+#requires -Version 7.0
+
+[CmdletBinding()]
+param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Assert-Contract {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$Condition,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if (-not $Condition) {
+        throw $Message
+    }
+}
+
+function Get-RepositoryText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    $path = Join-Path $script:repositoryRoot $RelativePath
+    Assert-Contract (Test-Path -LiteralPath $path -PathType Leaf) "Missing required file: $RelativePath"
+    return Get-Content -Raw -LiteralPath $path
+}
+
+$script:repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$templateText = Get-RepositoryText 'infra/lab-lightsail/template.yaml'
+$bootstrapText = Get-RepositoryText 'scripts/lab-lightsail/bootstrap.sh'
+$healthText = Get-RepositoryText 'scripts/lab-lightsail/health-check.sh'
+$renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
+$composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
+$versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
+$readmeText = Get-RepositoryText 'README.md'
+
+$removedPaths = @(
+    'infra/lab-lightsail/access-bootstrap.yaml'
+    'infra/lab-lightsail/deployer-policy.json'
+    'infra/lab-lightsail/cleanup-policy.json'
+    'scripts/lab-lightsail/backup.sh'
+    'scripts/lab-lightsail/restore-test.sh'
+    'scripts/lab-lightsail/Grant-QFieldCloudPilotAccess.ps1'
+    'scripts/lab-lightsail/Install-QFieldCloudPilot.ps1'
+    'scripts/lab-lightsail/Deploy-QFieldCloudPilot.ps1'
+    'scripts/lab-lightsail/Test-QFieldCloudPilot.ps1'
+    'docs/access-bootstrap.md'
+    'docs/runbooks/backup.md'
+    'docs/runbooks/restore-test.md'
+)
+foreach ($removedPath in $removedPaths) {
+    Assert-Contract (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $removedPath))) (
+        "Removed IAM/CLI or backup feature remains: $removedPath"
+    )
+}
+
+Assert-Contract (
+    $templateText.Contains('Type: AWS::Lightsail::Instance') -and
+    $templateText.Contains('Type: AWS::Lightsail::StaticIp') -and
+    $templateText.Contains('Type: AWS::Lightsail::Alarm') -and
+    $templateText.Contains('BlueprintId: ubuntu_24_04') -and
+    $templateText.Contains('BundleId: medium_3_0') -and
+    $templateText.Contains('Default: ap-northeast-2') -and
+    $templateText.Contains('Default: ap-northeast-2a') -and
+    $templateText.Contains('Default: qfieldcloud-pilot')
+) 'The one-click template does not pin the validated Seoul Lightsail defaults.'
+
+Assert-Contract (
+    -not $templateText.Contains('AWS::IAM::') -and
+    -not $templateText.Contains('AddOns:') -and
+    -not $templateText.Contains('AutoSnapshot') -and
+    -not $templateText.Contains('CPUUtilization') -and
+    -not $templateText.Contains('DeletionPolicy: Retain') -and
+    -not $templateText.Contains('UpdateReplacePolicy: Retain')
+) 'The template still creates IAM, automatic snapshot, CPU alarm, or retained resources.'
+
+$parameterBlock = [regex]::Match($templateText, '(?ms)^Parameters:\r?\n(?<Body>.*?)(?=^Rules:)')
+Assert-Contract $parameterBlock.Success 'CloudFormation Parameters block was not found.'
+Assert-Contract (
+    -not $parameterBlock.Groups['Body'].Value.Contains('BootstrapRevision:') -and
+    -not $parameterBlock.Groups['Body'].Value.Contains('BootstrapSha256:') -and
+    -not $parameterBlock.Groups['Body'].Value.Contains('BundleId:') -and
+    -not $parameterBlock.Groups['Body'].Value.Contains('BlueprintId:')
+) 'Release or server product pins remain user-overridable CloudFormation parameters.'
+
+$zeroRevision = '0' * 40
+$zeroChecksum = '0' * 64
+Assert-Contract (([regex]::Matches($templateText, '(?<!0)0{40}(?!0)')).Count -eq 4) (
+    'The release builder contract requires exactly four 40-character revision sentinels.'
+)
+Assert-Contract (([regex]::Matches($templateText, '(?<!0)0{64}(?!0)')).Count -eq 2) (
+    'The release builder contract requires exactly two 64-character checksum sentinels.'
+)
+Assert-Contract (([regex]::Matches($templateText, '__RELEASE_VERSION__')).Count -eq 1) (
+    'The release builder contract requires exactly one release-version sentinel.'
+)
+
+foreach ($requiredOutput in @(
+    'HttpsUrl:'
+    'InstanceName:'
+    'InstallationStatus:'
+    'AdministratorCredentials:'
+    'DeleteInstructions:'
+    'DataProtectionWarning:'
+)) {
+    Assert-Contract $templateText.Contains($requiredOutput) "Missing CloudFormation output: $requiredOutput"
+}
+Assert-Contract (
+    $templateText.Contains('sudo /opt/qfieldcloud/bin/show-admin-credentials.sh') -and
+    $templateText.Contains('Type: AWS::CloudFormation::WaitCondition') -and
+    $templateText.Contains('Type: AWS::CloudFormation::WaitConditionHandle') -and
+    $templateText.Contains("Timeout: '9000'") -and
+    $templateText.Contains('set +x') -and
+    $templateText.Contains('actual_sha256=') -and
+    $templateText.IndexOf('actual_sha256=', [StringComparison]::Ordinal) -lt
+        $templateText.IndexOf('install -m 0700 "$download_path" "$bootstrap_file"', [StringComparison]::Ordinal)
+) 'UserData checksum, secret-suppression, completion gate, or browser credential contract regressed.'
+
+$outputsBlock = [regex]::Match($templateText, '(?ms)^Outputs:\r?\n(?<Body>.*)$')
+Assert-Contract $outputsBlock.Success 'CloudFormation Outputs block was not found.'
+Assert-Contract (
+    -not [regex]::IsMatch(
+        $outputsBlock.Groups['Body'].Value,
+        '(?i)(ADMIN_PASSWORD|POSTGRES_PASSWORD|OBJECT_STORAGE_ROOT_PASSWORD|SECRET_KEY|SALT_KEY)'
+    )
+) 'A secret name appears in CloudFormation Outputs.'
+
+foreach ($serverText in @($bootstrapText, $healthText)) {
+    Assert-Contract (
+        -not $serverText.Contains('backup.sh') -and
+        -not $serverText.Contains('restore-test.sh') -and
+        -not $serverText.Contains('last-backup') -and
+        -not $serverText.Contains('last-restore-test') -and
+        -not $serverText.Contains('restore_test_orphan')
+    ) 'Backup or restore remains coupled to bootstrap or health success.'
+}
+Assert-Contract (
+    $bootstrapText.Contains('helper_names=(health-check.sh show-admin-credentials.sh worker-smoke-test.sh certificate-renew.sh)') -and
+    $bootstrapText.Contains('"$install_root/bin/worker-smoke-test.sh"') -and
+    $bootstrapText.Contains('"$install_root/bin/health-check.sh" --installation-gate') -and
+    $bootstrapText.Contains('The complete service and worker validation gate failed.') -and
+    $healthText.Contains('[[ $worker_validation == "passed" ]]')
+) 'Bootstrap no longer gates completion on service and worker validation.'
+
+Assert-Contract (
+    $renewText.Contains('CERTBOT_EXPECTED_VERSION') -and
+    $renewText.Contains('--preferred-profile "$LETSENCRYPT_CERTIFICATE_PROFILE"') -and
+    $renewText.Contains('--ip-address "$public_host"') -and
+    $bootstrapText.Contains('systemctl enable --now qfieldcloud-certificate-renew.timer') -and
+    $composeText.Contains('image: "${CERTBOT_IMAGE:?required}"')
+) 'Pinned HTTPS certificate issuance or renewal wiring is missing.'
+
+$imageLines = @(
+    $versionText -split "`r?`n" |
+        Where-Object { $_ -match '^[A-Z0-9_]+_IMAGE=' -and $_ -notmatch '^QFC_QGIS4_IMAGE=' }
+)
+Assert-Contract ($imageLines.Count -ge 10) 'Expected pinned container image manifest entries were not found.'
+foreach ($imageLine in $imageLines) {
+    Assert-Contract ($imageLine -match '@sha256:[0-9a-f]{64}$') "Mutable container image reference: $imageLine"
+}
+
+$operationalText = @($templateText, $bootstrapText, $composeText, $versionText) -join "`n"
+Assert-Contract (
+    -not [regex]::IsMatch($operationalText, '(?i)(:latest(?:\s|$)|/refs/heads/(?:main|master)|github\.com/[^\s]+/(?:main|master)/)')
+) 'An operational dependency uses latest, main, or master.'
+
+$legacyNames = @(
+    'qfc-account-admin'
+    'qfc-installer'
+    'qfc-lab-role'
+    'QFieldCloudLabDeployer'
+    'Grant-QFieldCloudPilotAccess.ps1'
+    'Install-QFieldCloudPilot.ps1'
+)
+$safeRepositoryRoot = $repositoryRoot.Replace('\', '/')
+$repositoryPaths = @(
+    & git -c "safe.directory=$safeRepositoryRoot" -C $repositoryRoot `
+        ls-files --cached --others --exclude-standard
+)
+Assert-Contract ($LASTEXITCODE -eq 0 -and $repositoryPaths.Count -gt 0) (
+    'Git could not enumerate the tracked and reviewable untracked repository files.'
+)
+$scannableFiles = @(
+    foreach ($repositoryPath in $repositoryPaths) {
+        $fullPath = Join-Path $repositoryRoot $repositoryPath
+        if ((Test-Path -LiteralPath $fullPath -PathType Leaf) -and
+            $fullPath -ne $PSCommandPath) {
+            Get-Item -LiteralPath $fullPath
+        }
+    }
+)
+$allRepositoryText = ($scannableFiles | ForEach-Object {
+    [System.Text.Encoding]::ASCII.GetString(
+        [System.IO.File]::ReadAllBytes($_.FullName)
+    )
+}) -join "`n"
+$removedFeatureTokens = @(
+    'backup.sh'
+    'restore-test.sh'
+    'last-backup-'
+    'last-restore-test'
+    'com.qfieldcloud.restore-test'
+    'EnableAutomaticSnapshots'
+    'AutomaticSnapshotTimeUtc'
+    'AutoSnapshot'
+)
+foreach ($removedFeatureToken in $removedFeatureTokens) {
+    Assert-Contract (-not $allRepositoryText.Contains($removedFeatureToken)) (
+        "Removed backup, restore, or automatic snapshot wiring remains: $removedFeatureToken"
+    )
+}
+foreach ($legacyName in $legacyNames) {
+    Assert-Contract (-not $allRepositoryText.Contains($legacyName)) "Legacy IAM/CLI identity remains: $legacyName"
+}
+Assert-Contract (
+    -not [regex]::IsMatch($allRepositoryText, '\b(?:AKIA|ASIA)[A-Z0-9]{16}\b') -and
+    -not [regex]::IsMatch($allRepositoryText, '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+) 'A possible AWS access key ID or private key was found.'
+
+$markdownFiles = @($scannableFiles | Where-Object { $_.Extension -ceq '.md' })
+foreach ($markdownFile in $markdownFiles) {
+    $markdownText = Get-Content -Raw -LiteralPath $markdownFile.FullName
+    $markdownText = [regex]::Replace($markdownText, '(?ms)```.*?```', '')
+    foreach ($match in [regex]::Matches($markdownText, '!?(?:\[[^\]]*\])\((?<Target>[^)]+)\)')) {
+        $target = $match.Groups['Target'].Value.Trim()
+        if ($target.StartsWith('<') -and $target.EndsWith('>')) {
+            $target = $target.Substring(1, $target.Length - 2)
+        }
+        if ($target -match '^(?:https?://|mailto:|#)') {
+            continue
+        }
+        $target = ($target -split '#', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($target)) {
+            continue
+        }
+        $resolvedTarget = Join-Path $markdownFile.DirectoryName $target
+        Assert-Contract (Test-Path -LiteralPath $resolvedTarget) (
+            "Broken relative Markdown link in $($markdownFile.FullName): $target"
+        )
+    }
+}
+
+Assert-Contract (
+    $readmeText.Contains('Launch QFieldCloud on AWS') -and
+    $readmeText.Contains('S3 게시 전') -and
+    -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
+) 'README must keep the Launch button visibly disabled until a verified S3 URL is published.'
+
+Write-Output 'One-click Lightsail static contract validation passed. AWS and S3 were not called.'

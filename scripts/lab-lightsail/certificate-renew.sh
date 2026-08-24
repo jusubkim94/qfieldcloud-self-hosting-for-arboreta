@@ -97,7 +97,7 @@ trap on_exit EXIT
 skip_locked_operation() {
   local reason="$1"
 
-  # Backup, restore validation, worker smoke, or another certificate check can
+  # Bootstrap, the worker smoke test, or another certificate check can
   # legitimately hold these locks. Preserve the last verified certificate
   # state and let the next six-hour timer attempt retry. Health still fails if
   # no real certificate check succeeds within its bounded freshness window.
