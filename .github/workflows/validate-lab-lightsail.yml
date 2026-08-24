@@ -69,7 +69,7 @@ jobs:
 
       - name: Check source and downloadable CloudFormation templates
         shell: pwsh
-        run: cfn-lint infra/lab-lightsail/template.yaml releases/lab-lightsail/v0.1.0/template.yaml releases/lab-lightsail/v0.1.1/template.yaml releases/lab-lightsail/v0.1.2/template.yaml releases/lab-lightsail/v0.1.3/template.yaml
+        run: cfn-lint infra/lab-lightsail/template.yaml releases/lab-lightsail/v0.1.0/template.yaml releases/lab-lightsail/v0.1.1/template.yaml releases/lab-lightsail/v0.1.2/template.yaml releases/lab-lightsail/v0.1.3/template.yaml releases/lab-lightsail/v0.1.4/template.yaml
 
       - name: Check one-click, release, documentation, and secret contracts
         shell: pwsh

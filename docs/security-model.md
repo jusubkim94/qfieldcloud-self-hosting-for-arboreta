@@ -4,9 +4,9 @@
 
 ## 현재 검증 상태
 
-- 현재 `v0.1.3` CloudFormation artifact와 SHA-256은 저장소에 포함되어 있습니다. 과거 `v0.1.0`~`v0.1.2`도 변경 없이 보존합니다.
-- `v0.1.2`는 공인 인증서 적용까지 실제 AWS에서 확인했지만 worker 내부 API 단계에서 실패했으며, 전체 성공 경로는 아직 종단 간 검증하지 않았습니다.
-- 따라서 아래 내용은 현재 설계와 정적 계약이며 실제 운영 검증 완료 주장이 아닙니다.
+- 현재 `v0.1.4` CloudFormation artifact와 SHA-256은 저장소에 포함되어 있습니다. 과거 `v0.1.0`~`v0.1.3`도 변경 없이 보존합니다.
+- `v0.1.3` 자체서명 경로와 `v0.1.4` 기본 공인 인증서 경로는 각각 실제 AWS `CREATE_COMPLETE`까지 통과했습니다. `v0.1.4`의 인증서 신뢰·IP SAN·HTTPS·상태 API 직접 관찰값과 installation-gate 근거는 [실제 AWS 검증 기록](verification/lab-lightsail-v0.1.4-2026-08-25.md)에 구분했습니다.
+- 따라서 아래 내용은 파일럿 설계와 검증 범위이며 운영 준비 완료나 장기 안정성 보장이 아닙니다.
 
 ## 보호 대상
 
@@ -75,7 +75,7 @@ CloudFormation 또는 Lightsail 권한이 부족하면 AWS의 권한 오류로 �
 - `letsencrypt-ip` 모드는 Let’s Encrypt, 공개 인터넷, HTTP-01 도달 가능성과 rate limit에 의존합니다.
 - 공인 인증서가 있어도 애플리케이션 보안이나 운영 준비 완료를 의미하지 않습니다.
 
-공인 인증서 모드는 고정된 Certbot 이미지, 현재 static IPv4 SAN, CA chain, 인증서·개인키 일치와 만료 여유를 검사한 뒤에만 적용합니다. 실제 원클릭 경로의 최초 발급과 Nginx 적용은 확인했지만 시간 경과 갱신은 아직 검증하지 않았습니다.
+공인 인증서 모드는 고정된 Certbot 이미지, 현재 static IPv4 SAN, CA chain, 인증서·개인키 일치와 만료 여유를 검사한 뒤에만 적용합니다. `v0.1.4` 실제 AWS 시험에서 최초 발급, Nginx 적용과 외부 신뢰를 확인했고 설치 완료 gate는 갱신 timer의 enabled·active 상태를 확인했습니다. 시간이 실제로 흐른 뒤 timer가 인증서를 갱신하는 과정은 아직 검증하지 않았습니다.
 
 ## Docker 호스트 위험
 

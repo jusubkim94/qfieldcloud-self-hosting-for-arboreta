@@ -143,7 +143,7 @@ Conditions:
 Mappings:
   ReleasePins:
     Current:
-      ArtifactVersion: '__RELEASE_VERSION__'
+      ArtifactVersion: 'v0.1.4'
 
 Resources:
   BootstrapWaitHandle:
@@ -203,9 +203,9 @@ Resources:
         readonly state_dir='/var/lib/qfieldcloud-bootstrap'
         readonly install_root='/opt/qfieldcloud'
         readonly repository_url='https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta.git'
-        readonly revision='0000000000000000000000000000000000000000'
-        readonly expected_sha256='0000000000000000000000000000000000000000000000000000000000000000'
-        readonly raw_url='https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/0000000000000000000000000000000000000000/scripts/lab-lightsail/bootstrap.sh'
+        readonly revision='d00c5fa4581188299565938d8324103e740a6d9c'
+        readonly expected_sha256='66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c'
+        readonly raw_url='https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/d00c5fa4581188299565938d8324103e740a6d9c/scripts/lab-lightsail/bootstrap.sh'
         readonly bootstrap_file="$state_dir/bootstrap.sh"
         readonly bootstrap_log="$state_dir/bootstrap.log"
         readonly bootstrap_timeout_seconds='6000'
@@ -497,11 +497,11 @@ Outputs:
 
   BootstrapRevision:
     Description: Immutable public Git commit selected by the release Launch link.
-    Value: '0000000000000000000000000000000000000000'
+    Value: 'd00c5fa4581188299565938d8324103e740a6d9c'
 
   BootstrapSha256:
     Description: SHA-256 of the bootstrap file verified before execution.
-    Value: '0000000000000000000000000000000000000000000000000000000000000000'
+    Value: '66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c'
 
   BootstrapValidationData:
     Description: >-
@@ -533,7 +533,7 @@ Outputs:
   DeleteInstructions:
     Description: Browser-only removal guide pinned to the same installer commit.
     Value: >-
-      https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/blob/0000000000000000000000000000000000000000/docs/runbooks/uninstall.md
+      https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/blob/d00c5fa4581188299565938d8324103e740a6d9c/docs/runbooks/uninstall.md
 
   ReleaseArtifactVersion:
     Description: Immutable release artifact version used for this stack.

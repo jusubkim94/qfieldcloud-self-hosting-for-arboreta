@@ -1,6 +1,6 @@
 # lab-lightsail 구성 흐름
 
-> `v0.1.2` 실제 AWS 시험은 공인 인증서 적용 뒤 `create_project` worker 내부 API 단계에서 실패했습니다. 원인은 확인했지만 수정 경로의 성공 종단 간 시험은 아직 완료하지 못했습니다.
+> `v0.1.3` 자체서명 경로와 Let’s Encrypt 공인 IP 인증서가 기본인 `v0.1.4` 경로는 수정된 worker 내부 API를 포함해 각각 실제 AWS `CREATE_COMPLETE`까지 통과했습니다. `v0.1.4`의 직접 관찰값과 installation-gate 근거는 [실제 AWS 검증 기록](../verification/lab-lightsail-v0.1.4-2026-08-25.md)에 구분해 기록했습니다.
 
 ## 사용자가 보는 흐름
 

@@ -25,8 +25,8 @@ flowchart LR
 
 ## 배포 파일과 원본 틀
 
-- 사용자가 올리는 완성본: [`releases/lab-lightsail/v0.1.3/template.yaml`](../releases/lab-lightsail/v0.1.3/template.yaml)
-- 완성본 정보와 해시: [`manifest.json`](../releases/lab-lightsail/v0.1.3/manifest.json), [`SHA256SUMS`](../releases/lab-lightsail/v0.1.3/SHA256SUMS)
+- 사용자가 올리는 완성본: [`releases/lab-lightsail/v0.1.4/template.yaml`](../releases/lab-lightsail/v0.1.4/template.yaml)
+- 완성본 정보와 해시: [`manifest.json`](../releases/lab-lightsail/v0.1.4/manifest.json), [`SHA256SUMS`](../releases/lab-lightsail/v0.1.4/SHA256SUMS)
 - 개발자가 관리하는 원본 틀: [`infra/lab-lightsail/template.yaml`](../infra/lab-lightsail/template.yaml)
 
 원본 틀의 자리표시자는 릴리스 생성 도구가 검토된 Git commit과 `bootstrap.sh` SHA-256으로 교체합니다. 따라서 사용자는 원본 틀이 아니라 완성본만 업로드해야 합니다.
@@ -45,7 +45,7 @@ flowchart LR
 - 스택 생성 버튼을 누르는 순간부터 비용 자원이 생길 수 있습니다.
 - 단일 서버가 멈추면 전체 서비스가 중단됩니다.
 - 자동 백업·복원·snapshot이 없으므로 서버나 스택 삭제 시 데이터를 복구할 수 없습니다.
-- 기본 자체서명 인증서는 브라우저 경고를 표시합니다.
+- 기본 Let’s Encrypt 공인 IP 인증서는 외부 인증기관, 공개 HTTP 80 도달 가능성과 발급 제한에 의존합니다. 사용자는 현재 약관을 읽고 동의 값을 직접 `true`로 선택해야 합니다.
 
 정확한 과금은 AWS 가격과 계정 상태에 따라 달라질 수 있으므로 [비용 문서](costs.md)도 확인합니다.
 
@@ -54,8 +54,10 @@ flowchart LR
 서버 내부 서비스와 worker 검사가 통과하고 CloudFormation이 `CREATE_COMPLETE`가 되어야 완료입니다. 최대 대기 시간은 150분입니다. 삭제 방법은 [삭제 실행서](runbooks/uninstall.md)에 있습니다.
 
 - 정적 검사 완료: CloudFormation, PowerShell, Bash, 고정 이미지 digest, 릴리스 해시와 문서 링크
-- 부분 검증: 공인 IP 인증서 발급·Nginx 적용·신뢰된 HTTPS와 갱신 timer 설치
-- 아직 미검증: 수정된 worker 내부 API를 포함한 새 AWS 스택 생성·서비스 확인·삭제 전체 과정
+- 완료 검증: `v0.1.3` 자체서명 경로의 새 AWS 스택 생성, 서비스·QGIS worker 확인과 `CREATE_COMPLETE`
+- 완료 검증: `v0.1.4` 기본 Let’s Encrypt 경로의 CloudShell 스택 생성, `CREATE_COMPLETE`, 공인 IP 인증서 외부 신뢰·주소 일치, HTTPS와 상태 API. 자세한 근거는 [실제 AWS 검증 기록](verification/lab-lightsail-v0.1.4-2026-08-25.md)에 있습니다.
+- 설치 완료 gate 근거: 인증서 fingerprint 일치, 갱신 timer enabled·active와 worker 통과. 이번 회차에 별도 SSH 명령으로 재실행한 결과는 아닙니다.
+- 아직 미검증: 시간 경과 후 실제 인증서 갱신, 실패 시 `DO_NOTHING` 자원 보존 동작, `v0.1.4` 브라우저 파일 업로드 화면과 성공 스택 삭제
 - 생성 시 달라질 수 있음: `medium_3_0`과 `ap-northeast-2a`의 계정별 가용성
 
 관리자가 여러 사용자에게 한 번 클릭 링크를 제공해야 할 때만 [선택적 S3 게시 절차](release-publishing.md)를 사용할 수 있습니다. 일반 사용자의 기본 설치에는 필요하지 않습니다.

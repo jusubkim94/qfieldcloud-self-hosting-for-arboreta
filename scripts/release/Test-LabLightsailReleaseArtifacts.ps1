@@ -542,9 +542,9 @@ try {
         [string]$quickParameters.param_DeploymentRegion -ceq 'ap-northeast-2' -and
         [string]$quickParameters.param_AvailabilityZone -ceq 'ap-northeast-2a' -and
         [string]$quickParameters.param_InstanceName -ceq 'qfieldcloud-pilot' -and
-        [string]$quickParameters.param_CertificateMode -ceq 'self-signed' -and
+        [string]$quickParameters.param_CertificateMode -ceq 'letsencrypt-ip' -and
         [string]$quickParameters.param_LetsEncryptTermsAccepted -ceq 'false'
-    ) 'Quick Create URL lost its fixed stack, Seoul, safe certificate, or versioned template contract.'
+    ) 'Quick Create URL lost its fixed stack, Seoul, public-certificate default, explicit agreement gate, or versioned template contract.'
 
     $publisherSourceText = Get-Content -Raw -LiteralPath $publisherPath
     Assert-Contract (-not [regex]::IsMatch($publisherSourceText, '(?i)\bcreate-bucket\b')) (

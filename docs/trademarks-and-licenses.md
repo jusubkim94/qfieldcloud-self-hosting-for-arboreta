@@ -22,9 +22,9 @@ MIT와 같은 오픈소스 라이선스는 소프트웨어를 사용할 권리�
 | Memcached 이미지 | `memcached:1`의 고정 digest | [공식 Memcached 저장소](https://github.com/memcached/memcached) | Memcached와 공식 컨테이너 기반 계층의 고지를 확인합니다. |
 | Certbot ACME client | `5.7.0`의 고정 `linux/amd64` digest | [Certbot `5.7.0` 릴리스](https://github.com/certbot/certbot/releases/tag/v5.7.0), [해당 태그의 Apache License 2.0](https://github.com/certbot/certbot/blob/v5.7.0/LICENSE.txt) | `letsencrypt-ip` 선택 모드에서만 실행합니다. Certbot 고지를 유지하고 이미지 안의 Python·OS 의존성 고지도 별도로 확인합니다. |
 
-Let’s Encrypt는 이 저장소에 포함해 재배포하는 소프트웨어가 아니라 외부 인증기관 서비스입니다. `letsencrypt-ip` 사용자는 설치 직전에 [Let’s Encrypt Subscriber Agreement와 정책 저장소](https://letsencrypt.org/repository/)를 읽고 `-AcceptLetsEncryptTerms`로 동의를 명시해야 합니다. Let’s Encrypt 이름은 선택한 인증서 발급 서비스를 설명하는 범위로만 사용하며 이 프로젝트가 ISRG 또는 Let’s Encrypt의 공식·승인 제품이라는 인상을 주지 않습니다.
+Let’s Encrypt는 이 저장소에 포함해 재배포하는 소프트웨어가 아니라 외부 인증기관 서비스입니다. `letsencrypt-ip` 사용자는 설치 직전에 [Let’s Encrypt Subscriber Agreement와 정책 저장소](https://letsencrypt.org/repository/)를 읽고 CloudFormation의 `LetsEncryptTermsAccepted`를 직접 `true`로 선택해 동의를 명시해야 합니다. Let’s Encrypt 이름은 선택한 인증서 발급 서비스를 설명하는 범위로만 사용하며 이 프로젝트가 ISRG 또는 Let’s Encrypt의 공식·승인 제품이라는 인상을 주지 않습니다.
 
-Certbot `5.7.0` 이미지와 자동화 코드는 정적 계약 검사를 대상으로 추가됐지만, 현재 AWS 스택에는 적용하지 않았고 실제 Let’s Encrypt 최초 발급·갱신 종단 간 시험 전입니다. 라이선스 기록은 기술 검증 완료나 서비스 가용성 보증을 뜻하지 않습니다.
+Certbot `5.7.0` 이미지와 자동화 코드는 정적 계약 검사 대상이며, `v0.1.4` 실제 AWS 시험에서 Let’s Encrypt 최초 발급·Nginx 적용·신뢰된 HTTPS와 전체 설치 완료를 확인했습니다. 설치 완료 gate는 갱신 timer의 enabled·active 상태를 확인했지만 시간 경과 후 실제 자동 갱신은 아직 검증하지 않았습니다. 자세한 범위는 [실제 AWS 검증 기록](verification/lab-lightsail-v0.1.4-2026-08-25.md)에 있습니다. 라이선스 기록은 기술 검증 완료나 서비스 가용성 보증을 뜻하지 않습니다.
 
 ## PROJ-data 라이선스 목록
 

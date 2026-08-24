@@ -41,14 +41,17 @@ $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
 $workerNginxText = Get-RepositoryText 'runtime/lab-lightsail/nginx-worker-api.conf.template'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
-$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/template.yaml'
-$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/manifest.json'
-$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/SHA256SUMS'
-$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
-$previousReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
-$previousReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
-$olderReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/template.yaml'
-$olderReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
+$verificationText = Get-RepositoryText 'docs/verification/lab-lightsail-v0.1.4-2026-08-25.md'
+$releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/template.yaml'
+$releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/manifest.json'
+$releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/SHA256SUMS'
+$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.4/qfieldcloud-lab-lightsail-v0.1.4.zip'
+$previousReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/template.yaml'
+$previousReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
+$olderReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
+$olderReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
+$earlierReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/template.yaml'
+$earlierReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.1/qfieldcloud-lab-lightsail-v0.1.1.zip'
 $legacyReleaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
 $legacyReleaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
 
@@ -82,6 +85,24 @@ Assert-Contract (
     $templateText.Contains('Default: ap-northeast-2a') -and
     $templateText.Contains('Default: qfieldcloud-pilot')
 ) 'The one-click template does not pin the validated Seoul Lightsail defaults.'
+
+$certificateParameterBlock = [regex]::Match(
+    $templateText,
+    '(?ms)^  CertificateMode:\r?\n(?<Body>.*?)(?=^  LetsEncryptTermsAccepted:)'
+)
+$termsParameterBlock = [regex]::Match(
+    $templateText,
+    '(?ms)^  LetsEncryptTermsAccepted:\r?\n(?<Body>.*?)(?=^Rules:)'
+)
+Assert-Contract (
+    $certificateParameterBlock.Success -and
+    $certificateParameterBlock.Groups['Body'].Value.Contains('Default: letsencrypt-ip') -and
+    $termsParameterBlock.Success -and
+    $termsParameterBlock.Groups['Body'].Value.Contains("Default: 'false'") -and
+    $termsParameterBlock.Groups['Body'].Value.Contains('https://letsencrypt.org/repository/') -and
+    $templateText.Contains('PublicCertificateTermsMustBeAccepted:') -and
+    $templateText.Contains("Assert: !Equals [!Ref LetsEncryptTermsAccepted, 'true']")
+) "Let’s Encrypt must be the certificate default while agreement remains an explicit user choice."
 
 Assert-Contract (
     -not $templateText.Contains('AWS::IAM::') -and
@@ -325,19 +346,31 @@ try {
         $releaseArchive.Entries[0].FullName -eq 'template.yaml' -and
         $releaseArchive.Entries[0].Length -eq (Get-Item -LiteralPath $releaseTemplatePath).Length
     ) 'The downloadable ZIP must contain only the complete template.yaml.'
+    $archiveTemplateStream = $releaseArchive.Entries[0].Open()
+    try {
+        $archiveTemplateHash = [Convert]::ToHexString(
+            [System.Security.Cryptography.SHA256]::HashData($archiveTemplateStream)
+        ).ToLowerInvariant()
+    }
+    finally {
+        $archiveTemplateStream.Dispose()
+    }
+    Assert-Contract ($archiveTemplateHash -ceq $releaseTemplateHash) (
+        'The template.yaml bytes inside the downloadable ZIP differ from the reviewed release template.'
+    )
 }
 finally {
     $releaseArchive.Dispose()
 }
 Assert-Contract (
-    $releaseManifest.release_version -eq 'v0.1.3' -and
-    $releaseManifest.source_revision -eq 'b9b9ecc0ec5263a0d7172164d31239653530cfa6' -and
+    $releaseManifest.release_version -eq 'v0.1.4' -and
+    $releaseManifest.source_revision -eq 'd00c5fa4581188299565938d8324103e740a6d9c' -and
     $releaseManifest.template.sha256 -eq $releaseTemplateHash -and
-    $releaseTemplateHash -eq 'c977828bf0828074643fb03fa5c3bba9b99c1313da9c5514333d485b233b7677' -and
+    $releaseTemplateHash -eq '798f2f5aed1c88e27be81db79a06c7adf61f7e5f9ad8fcd3d7f4a114f8d71ffa' -and
     $releaseChecksums.Contains("$releaseTemplateHash  template.yaml") -and
-    $releaseArchiveHash -eq 'cd50246fbcb7cf8445683de9ea0c680e3c6438904d7b3b2f21d7a798e6f74761' -and
-    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.3.zip")
-) 'The committed v0.1.3 release manifest or checksum does not match template.yaml.'
+    $releaseArchiveHash -eq '3b351a133d6336be6c6043b7173e59050de28caab6646316720f084dc68a1ad8' -and
+    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.4.zip")
+) 'The committed v0.1.4 release manifest or checksum does not match template.yaml.'
 Assert-Contract (
     -not $releaseTemplateText.Contains($zeroRevision) -and
     -not $releaseTemplateText.Contains($zeroChecksum) -and
@@ -348,14 +381,20 @@ Assert-Contract (
 
 Assert-Contract (
     (Get-FileHash -Algorithm SHA256 -LiteralPath $previousReleaseTemplatePath).Hash.ToLowerInvariant() -eq
-        'f3c3391704bf07f7ab6b13d1b16115a105d50e4f07a52b4a5ff337bf2adabff4' -and
+        'c977828bf0828074643fb03fa5c3bba9b99c1313da9c5514333d485b233b7677' -and
     (Get-FileHash -Algorithm SHA256 -LiteralPath $previousReleaseArchivePath).Hash.ToLowerInvariant() -eq
+        'cd50246fbcb7cf8445683de9ea0c680e3c6438904d7b3b2f21d7a798e6f74761'
+) 'The immutable v0.1.3 release files changed unexpectedly.'
+Assert-Contract (
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseTemplatePath).Hash.ToLowerInvariant() -eq
+        'f3c3391704bf07f7ab6b13d1b16115a105d50e4f07a52b4a5ff337bf2adabff4' -and
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseArchivePath).Hash.ToLowerInvariant() -eq
         '8c5200d55d4b3be62fcea84e5fa5492cd1eb59d7db76d42af857f00ae82754b9'
 ) 'The immutable v0.1.2 release files changed unexpectedly.'
 Assert-Contract (
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseTemplatePath).Hash.ToLowerInvariant() -eq
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $earlierReleaseTemplatePath).Hash.ToLowerInvariant() -eq
         '33b36470d8a5b31aa4d634d9ecf8ca9804d238b03568feb4ebf11849f91e5b2b' -and
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $olderReleaseArchivePath).Hash.ToLowerInvariant() -eq
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $earlierReleaseArchivePath).Hash.ToLowerInvariant() -eq
         '5620adf6e304172750ab10c7cee8b98b82965f8ea3efa99fb815256b7dad657c'
 ) 'The immutable v0.1.1 release files changed unexpectedly.'
 Assert-Contract (
@@ -365,13 +404,29 @@ Assert-Contract (
         'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22'
 ) 'The immutable v0.1.0 release files changed unexpectedly.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ad3db49aa4242225b6b3fcd40b8f74e86579c6dc/releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ef444f600e8746286a5a0adeaf718aa40e06a33a/releases/lab-lightsail/v0.1.4/qfieldcloud-lab-lightsail-v0.1.4.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
     $readmeText.Contains('```mermaid') -and
-    $readmeText.Contains('create_project` worker 검증이 실패하여 스택이 롤백되었습니다.') -and
+    $readmeText.Contains('`v0.1.3` 자체서명 모드 실제 AWS 시험은 CloudFormation `CREATE_COMPLETE`') -and
+    $readmeText.Contains("``v0.1.4`` 기본 Let’s Encrypt 경로는 서울 리전의 새 AWS 스택에서 ``CREATE_COMPLETE``") -and
+    $readmeText.Contains('(docs/verification/lab-lightsail-v0.1.4-2026-08-25.md)') -and
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
+
+Assert-Contract (
+    $verificationText.Contains('`ap-northeast-2` / `ap-northeast-2a`') -and
+    $verificationText.Contains('`qfc`') -and
+    $verificationText.Contains('`qfieldcloud-pilot`') -and
+    $verificationText.Contains('`medium_3_0` / `ubuntu_24_04`') -and
+    $verificationText.Contains('`798f2f5aed1c88e27be81db79a06c7adf61f7e5f9ad8fcd3d7f4a114f8d71ffa`') -and
+    $verificationText.Contains('`d00c5fa4581188299565938d8324103e740a6d9c`') -and
+    $verificationText.Contains('`66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c`') -and
+    $verificationText.Contains('`807301a01287a3d389b3be3521c0f3d00e3331e3f831ac1a571720554f61ac00`') -and
+    $verificationText.Contains("시간이 실제로 흐른 뒤 timer가 Let’s Encrypt 인증서를 갱신하는 과정") -and
+    $verificationText.Contains('이번 배포는 실패하지 않았으므로 이 옵션을 경험적으로 시험하지 못했습니다') -and
+    $verificationText.Contains('브라우저의 **Upload a template file**로 올리는 화면 흐름')
+) 'The v0.1.4 AWS verification record is missing observed provenance, success evidence, or explicit unverified boundaries.'
 
 Write-Output 'Manual-download Lightsail static contract validation passed. AWS and S3 were not called.'
