@@ -88,7 +88,8 @@ CloudFormation 콘솔은 업로드한 파일을 사용자 AWS 계정의 내부 S
 - CloudFormation 문법, Bash·PowerShell 문법, 고정 이미지 digest, Secret 패턴과 문서 링크는 로컬 정적 검사로 확인했습니다.
 - 2026-08-24에 `v0.1.0` 수동 업로드 생성을 실제 AWS에서 시도했으나 `create_project` worker 검증이 실패하여 스택이 롤백되었습니다. 생성부터 `CREATE_COMPLETE`와 삭제까지의 성공 종단 간 시험은 아직 완료하지 못했습니다.
 - `v0.1.1` 재시험에서는 Let’s Encrypt IP 인증서 발급까지 성공했지만, Nginx 적용 직후의 단일 HTTPS 검사가 실패해 이전 자체서명 인증서로 안전 복구됐습니다.
-- `v0.1.2`는 Nginx 인증서 적용을 최대 60초 재확인하고 원인별 root 전용 로그를 보존하지만, 아직 실제 AWS 재시험 전입니다.
+- `v0.1.2` 재시험에서는 Let’s Encrypt 공인 IP 인증서 적용, 신뢰된 HTTPS 확인과 자동 갱신 timer 설치까지 성공했습니다. 이후 `create_project`의 `Get Project Seed` 단계에서 worker 내부 요청의 `Host: nginx`가 공식 Nginx 보호 규칙에 의해 응답 없이 종료되어 실패했고, 자동 진단자료 보존은 정상 동작했습니다.
+- 다음 릴리스는 외부 80/443 보호 규칙을 약화하지 않고 Docker 내부에만 공개되는 worker API 포트를 사용하도록 수정하지만, 아직 실제 AWS 재시험 전입니다.
 - `medium_3_0` 상품과 `ap-northeast-2a`의 현재 계정별 가용성은 생성 시점에 달라질 수 있습니다.
 - 기존 식물이력관리용 PostGIS 데이터베이스에는 연결하거나 변경하지 않습니다.
 

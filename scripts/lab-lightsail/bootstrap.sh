@@ -331,8 +331,9 @@ git -C "$installer_root" checkout --quiet --detach --force "$revision"
 
 readonly version_source="$installer_root/config/qfieldcloud-v26.25.env"
 readonly compose_source="$installer_root/runtime/lab-lightsail/compose.yaml"
+readonly nginx_worker_api_template_source="$installer_root/runtime/lab-lightsail/nginx-worker-api.conf.template"
 helper_names=(health-check.sh show-admin-credentials.sh worker-smoke-test.sh certificate-renew.sh)
-for required_file in "$version_source" "$compose_source"; do
+for required_file in "$version_source" "$compose_source" "$nginx_worker_api_template_source"; do
   if [[ ! -f $required_file ]]; then
     echo "Required installer file is missing: $required_file" >&2
     exit 1
@@ -348,6 +349,7 @@ done
 
 readonly versions_file="$install_root/versions.env"
 readonly compose_file="$install_root/compose.yaml"
+readonly nginx_worker_api_template="$install_root/nginx-worker-api.conf.template"
 
 # The file is from the exact installer commit verified above and contains only
 # non-secret version constants.
@@ -414,6 +416,7 @@ source_manifest_listing="$(
   sha256sum -- \
     config/qfieldcloud-v26.25.env \
     runtime/lab-lightsail/compose.yaml \
+    runtime/lab-lightsail/nginx-worker-api.conf.template \
     scripts/lab-lightsail/health-check.sh \
     scripts/lab-lightsail/show-admin-credentials.sh \
     scripts/lab-lightsail/worker-smoke-test.sh \
@@ -515,7 +518,8 @@ if [[ -f $installed_release_file ]]; then
     exit 1
   fi
   if ! cmp -s -- "$versions_file" "$version_source" || \
-    ! cmp -s -- "$compose_file" "$compose_source"; then
+    ! cmp -s -- "$compose_file" "$compose_source" || \
+    ! cmp -s -- "$nginx_worker_api_template" "$nginx_worker_api_template_source"; then
     echo "Installed runtime files differ from the approved installer manifest." >&2
     exit 1
   fi
@@ -532,6 +536,7 @@ fi
 # source manifest has passed every check and the installed release agrees.
 install -m 0600 "$version_source" "$versions_file"
 install -m 0600 "$compose_source" "$compose_file"
+install -m 0600 "$nginx_worker_api_template_source" "$nginx_worker_api_template"
 install -m 0700 -d "$install_root/bin"
 for helper_name in "${helper_names[@]}"; do
   helper_source="$installer_root/scripts/lab-lightsail/$helper_name"

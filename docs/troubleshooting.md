@@ -8,7 +8,7 @@
 - 실패한 설치를 무작정 반복하지 않습니다. 같은 이름의 자원 충돌과 추가 비용이 생길 수 있습니다.
 - 이 파일럿에는 자동 스냅샷과 애플리케이션 백업이 없습니다. 삭제나 교체는 데이터를 영구 손실시킬 수 있습니다.
 
-> 2026-08-24 `v0.1.0` 수동 업로드 생성은 실제 AWS에서 `create_project` worker 검증에 실패했습니다. `v0.1.1` 재시험은 Let’s Encrypt IP 인증서 발급 후 Nginx 적용 검증에 실패했습니다. 두 경우 모두 안전하게 중단됐으며 성공 종단 간 검증은 아직 완료하지 못했습니다.
+> 2026-08-24 `v0.1.2` 재시험은 Let’s Encrypt IP 인증서 적용과 갱신 timer 설치까지 성공한 뒤 `create_project`의 `Get Project Seed` 단계에서 실패했습니다. 보존 로그로 worker의 `Host: nginx` 요청이 공식 Nginx 보호 규칙에서 종료된 원인을 확인했으며, 다음 릴리스의 Docker 전용 worker API 경로는 아직 실제 AWS 재시험 전입니다.
 
 ## 설치 파일이 내려받아지지 않음
 
@@ -46,7 +46,7 @@
 4. **Lightsail → Instances**, **Networking → Static IPs**, **Alarms**에서도 잔존 자원을 확인합니다.
 5. 조사하지 않을 경우 [삭제 실행서](runbooks/uninstall.md)에 따라 제거합니다.
 
-worker 검증이 실패하면 설치기는 시험 프로젝트를 정리하기 전에 `/var/lib/qfieldcloud-bootstrap/diagnostics/worker-smoke-failure.*`에 Job feedback, 최근 app·worker wrapper 로그, 확인 가능한 QGIS 작업 컨테이너 상태, OOM 기록과 서버 용량을 자동 저장합니다. 정확한 경로는 `/var/lib/qfieldcloud-bootstrap/bootstrap.log`에도 기록됩니다. 확인 방법과 공유 전 가림 항목은 [로그 실행서](runbooks/logs.md)를 따릅니다.
+worker 검증이 실패하면 설치기는 시험 프로젝트를 정리하기 전에 `/var/lib/qfieldcloud-bootstrap/diagnostics/worker-smoke-failure.*`에 Job feedback, 최근 Nginx·app·worker wrapper 로그, 확인 가능한 QGIS 작업 컨테이너 상태, OOM 기록과 서버 용량을 자동 저장합니다. 정확한 경로는 `/var/lib/qfieldcloud-bootstrap/bootstrap.log`에도 기록됩니다. 확인 방법과 공유 전 가림 항목은 [로그 실행서](runbooks/logs.md)를 따릅니다.
 
 설치기는 완료 신호를 최대 약 150분 기다리도록 설계되어 있습니다. 브라우저를 닫았거나 CloudFormation이 실패했다고 해서 자원이 모두 사라졌다고 가정하지 않습니다. 남은 인스턴스는 월 **US$24**, 분리된 고정 IP는 시간당 **US$0.005** 비용이 발생할 수 있습니다.
 
@@ -78,7 +78,7 @@ sudo /opt/qfieldcloud/bin/health-check.sh
 
 설치기는 공인 인증서를 Nginx에 적용한 뒤 최대 60초 동안 새 인증서 지문과 신뢰된 HTTPS 응답을 다시 확인합니다. 각 시도의 마지막 결과는 root만 읽을 수 있는 `/opt/qfieldcloud/state/certbot-log/last-validation.log`에 저장합니다. `status`, `expected_fingerprint`, `observed_fingerprint`, `openssl_exit`, `curl_exit`을 확인하면 새 인증서 전환 지연과 TLS 신뢰 오류를 구분할 수 있습니다. 이 파일에는 개인키를 기록하지 않지만, 공유하기 전 공개 IP 등 운영 식별정보를 가립니다.
 
-공인 IP 인증서 발급 자체는 실제 AWS에서 확인했지만, Nginx 적용부터 설치 완료 및 시간 경과 자동 갱신까지는 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
+공인 IP 인증서 발급, Nginx 적용과 신뢰된 HTTPS 응답은 실제 AWS에서 확인했습니다. 설치 완료와 시간 경과 자동 갱신까지는 아직 종단 간 검증하지 않았습니다. 정적 검사 성공만으로 검증 완료라고 표현하지 않습니다.
 
 ## 데이터베이스, 저장소 또는 worker 오류
 

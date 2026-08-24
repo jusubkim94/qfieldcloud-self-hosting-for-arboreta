@@ -16,7 +16,7 @@ flowchart LR
 ## 한 서버 안에 설치되는 것
 
 - QFieldCloud 웹·API 구성요소와 Nginx HTTPS 프록시
-- QGIS worker 3개
+- 작업마다 생성되는 임시 QGIS 3 worker
 - QFieldCloud 전용 PostgreSQL/PostGIS
 - 로컬 S3 호환 객체 저장소
 - 상태 확인과 인증서 갱신 도구
@@ -54,7 +54,8 @@ flowchart LR
 서버 내부 서비스와 worker 검사가 통과하고 CloudFormation이 `CREATE_COMPLETE`가 되어야 완료입니다. 최대 대기 시간은 150분입니다. 삭제 방법은 [삭제 실행서](runbooks/uninstall.md)에 있습니다.
 
 - 정적 검사 완료: CloudFormation, PowerShell, Bash, 고정 이미지 digest, 릴리스 해시와 문서 링크
-- 아직 미검증: 수동 업로드로 실제 새 AWS 스택 생성·서비스 확인·삭제 전체 과정
+- 부분 검증: 공인 IP 인증서 발급·Nginx 적용·신뢰된 HTTPS와 갱신 timer 설치
+- 아직 미검증: 수정된 worker 내부 API를 포함한 새 AWS 스택 생성·서비스 확인·삭제 전체 과정
 - 생성 시 달라질 수 있음: `medium_3_0`과 `ap-northeast-2a`의 계정별 가용성
 
 관리자가 여러 사용자에게 한 번 클릭 링크를 제공해야 할 때만 [선택적 S3 게시 절차](release-publishing.md)를 사용할 수 있습니다. 일반 사용자의 기본 설치에는 필요하지 않습니다.

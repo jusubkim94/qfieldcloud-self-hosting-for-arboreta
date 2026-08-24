@@ -47,7 +47,7 @@ x-django-environment: &django-environment
   QFIELDCLOUD_ADMIN_URI: admin/
   # The public host can be a raw IPv4 address. Containers must use Docker's
   # stable service DNS name instead of treating that public IP as an alias.
-  QFIELDCLOUD_WORKER_QFIELDCLOUD_URL: "http://nginx/api/v1/"
+  QFIELDCLOUD_WORKER_QFIELDCLOUD_URL: "http://nginx:8080/api/v1/"
   QFIELDCLOUD_SUBSCRIPTION_MODEL: subscription.Subscription
   QFIELDCLOUD_ACCOUNT_ADAPTER: qfieldcloud.core.adapters.AccountAdapterSignUpClosed
   QFIELDCLOUD_AUTH_TOKEN_EXPIRATION_HOURS: "720"
@@ -166,10 +166,15 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Port 8080 is available only on qfieldcloud_default for QGIS workers; it
+    # is deliberately not published on the Lightsail host.
+    expose:
+      - "8080"
     volumes:
       - ./state/certs:/etc/nginx/certs:ro
       - ./state/dhparams:/etc/nginx/dhparams:ro
       - ./state/nginx-config:/etc/nginx/config.d:ro
+      - ./nginx-worker-api.conf.template:/etc/nginx/templates/qfieldcloud-worker-api.conf.template:ro
       - certbot_www:/var/www/certbot:ro
       - static_volume:/var/www/html/staticfiles:ro
       - media_volume:/var/www/html/mediafiles:ro

@@ -38,6 +38,7 @@ $healthText = Get-RepositoryText 'scripts/lab-lightsail/health-check.sh'
 $workerSmokeText = Get-RepositoryText 'scripts/lab-lightsail/worker-smoke-test.sh'
 $renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
 $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
+$workerNginxText = Get-RepositoryText 'runtime/lab-lightsail/nginx-worker-api.conf.template'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
 $readmeText = Get-RepositoryText 'README.md'
 $releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.2/template.yaml'
@@ -195,6 +196,25 @@ Assert-Contract (
     $bootstrapText.Contains('systemctl enable --now qfieldcloud-certificate-renew.timer') -and
     $composeText.Contains('image: "${CERTBOT_IMAGE:?required}"')
 ) 'Pinned HTTPS issuance, renewal, bounded activation retry, or diagnostics are missing.'
+
+Assert-Contract (
+    $composeText.Contains('QFIELDCLOUD_WORKER_QFIELDCLOUD_URL: "http://nginx:8080/api/v1/"') -and
+    $composeText.Contains('./nginx-worker-api.conf.template:/etc/nginx/templates/qfieldcloud-worker-api.conf.template:ro') -and
+    $composeText.Contains("expose:`n      - `"8080`"") -and
+    $bootstrapText.Contains('runtime/lab-lightsail/nginx-worker-api.conf.template') -and
+    $healthText.Contains('runtime/lab-lightsail/nginx-worker-api.conf.template') -and
+    $workerNginxText.Contains('listen 8080;') -and
+    $workerNginxText.Contains('allow 172.30.0.0/24;') -and
+    $workerNginxText.Contains('deny all;') -and
+    $workerNginxText.Contains('proxy_set_header X-Forwarded-Proto https;') -and
+    $workerNginxText.Contains('proxy_set_header Host ${QFIELDCLOUD_HOST};') -and
+    $workerNginxText.Contains('location /storage-download/')
+) 'The Docker-private worker API proxy is missing or no longer preserves secure public request semantics.'
+
+Assert-Contract (
+    $renewText.Contains('local validation_attempt_limit_value="$3"') -and
+    -not $renewText.Contains('local validation_attempt_limit="$3"')
+) 'Certificate validation logging still shadows its readonly retry limit.'
 
 $imageLines = @(
     $versionText -split "`r?`n" |
