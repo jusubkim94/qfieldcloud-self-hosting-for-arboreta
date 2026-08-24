@@ -10,6 +10,7 @@ $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $releaseExecutablePath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
 $releaseChecksumsPath = Join-Path $repositoryRoot 'releases/tools/qfieldcloud-template-editor/v0.1.0/SHA256SUMS'
 $expectedReleaseHash = '2163cdbd58ab8cc14e39a263a3b8830c8d975c1a7c4c2b7eada6d8184f59d33f'
+$editorDownloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/0d23bbcbbcb421f840b39029727583cdbbae41de/releases/tools/qfieldcloud-template-editor/v0.1.0/QFieldCloudTemplateEditor-v0.1.0.exe'
 foreach ($releasePath in @($releaseExecutablePath, $releaseChecksumsPath)) {
     if (-not (Test-Path -LiteralPath $releasePath -PathType Leaf)) {
         throw "Missing editor release file: $releasePath"
@@ -23,6 +24,12 @@ if ($releaseHash -ne $expectedReleaseHash -or
 }
 if ((Get-Item -LiteralPath $releaseExecutablePath).VersionInfo.FileVersion -ne '0.1.0.0') {
     throw 'The committed editor EXE has an unexpected file version.'
+}
+$mainReadme = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'README.md')
+if (-not $mainReadme.Contains($editorDownloadUrl) -or
+    -not $mainReadme.Contains('Standalone 구조') -or
+    -not $mainReadme.Contains('전체 설치 과정')) {
+    throw 'README does not expose the immutable editor EXE or its Korean diagram guidance.'
 }
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("qfc-template-editor-test-" + [guid]::NewGuid().ToString('N'))
