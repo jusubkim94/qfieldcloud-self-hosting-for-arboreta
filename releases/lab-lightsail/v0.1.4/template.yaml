@@ -1,0 +1,544 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Unofficial single-server QFieldCloud pilot in AWS Seoul. Creates a billable
+  4 GB Lightsail instance (official plan price checked 2026-08-24: USD 24/month
+  before tax and overage), a static IP, a restricted firewall, and one basic
+  status alarm. THERE IS NO BACKUP OR SNAPSHOT: deleting the stack or server
+  permanently loses its data. Use an MFA-protected AWS sign-in, never create a
+  root access key, and launch only a reviewed release-specific template. A
+  template cannot set CloudFormation's stack failure behavior: on the Configure
+  stack options page, select Preserve successfully provisioned resources when
+  the instance must remain available for failure diagnosis.
+
+Metadata:
+  cfn-lint:
+    config:
+      # AWS documents WaitCondition.Data as a valid Output even though it is a
+      # JSON name/value object; cfn-lint 1.55.1 models every Output as a string.
+      ignore_checks:
+        - E6101
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: One-click pilot settings
+        Parameters:
+          - DeploymentRegion
+          - AvailabilityZone
+          - InstanceName
+          - CertificateMode
+          - LetsEncryptTermsAccepted
+    ParameterLabels:
+      DeploymentRegion:
+        default: AWS Region (must match the console Region)
+      AvailabilityZone:
+        default: Lightsail Availability Zone
+      InstanceName:
+        default: Lightsail instance name
+      CertificateMode:
+        default: TLS certificate mode
+      LetsEncryptTermsAccepted:
+        default: Let’s Encrypt subscriber agreement reviewed and accepted
+  Project:
+    Name: qfieldcloud-self-hosting-for-arboreta
+    Profile: lab-lightsail
+    OfficialProject: false
+  SecurityNotes:
+    - This template has no password, token, access key, private key, or dynamic secret reference.
+    - Root users are not blocked, but MFA must be enabled and root access keys must never be created.
+    - The caller must already be allowed to create CloudFormation and Lightsail resources.
+    - Port 22 is restricted to the AWS-managed lightsail-connect browser SSH alias.
+    - UserData downloads a file first, verifies SHA-256, and only then executes it.
+    - Bootstrap output is written to a root-only file instead of the CloudFormation output.
+    - A stack-local wait handle gates completion and is never emitted as an output or log value.
+    - Public certificate mode exposes only the existing HTTP port 80 challenge path and stores ACME state root-only.
+  CostAndDataWarnings:
+    - This stack creates billable AWS resources. Delete the stack to stop instance charges.
+    - Preserving successfully provisioned resources is a create-stack operation option, not a YAML property; retained failure resources keep incurring charges until the stack is deleted.
+    - Automatic snapshots and application backup or restore jobs are deliberately absent.
+    - Deleting the stack, instance, or disk permanently loses all pilot data.
+    - A failed stack can retain resources until rollback or deletion finishes; inspect both CloudFormation and Lightsail.
+  UpdateNotes:
+    - This pilot installer supports creating a new stack only.
+    - In-place changes to Lightsail instance properties are not a supported update path for this pilot.
+    - There is no built-in data recovery path. Export important data before any replacement.
+
+Parameters:
+  DeploymentRegion:
+    Type: String
+    Default: ap-northeast-2
+    AllowedValues:
+      - ap-northeast-2
+    Description: >-
+      Informational safety input. Select Asia Pacific (Seoul), ap-northeast-2,
+      in the CloudFormation console before creating the stack.
+
+  AvailabilityZone:
+    Type: String
+    Default: ap-northeast-2a
+    AllowedPattern: '^ap-northeast-2[a-d]$'
+    ConstraintDescription: Use a Seoul Availability Zone such as ap-northeast-2a.
+    Description: >-
+      Lightsail Availability Zone. Availability still needs a deployment-time
+      preflight check because service capacity can change.
+
+  InstanceName:
+    Type: String
+    Default: qfieldcloud-pilot
+    MinLength: 3
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9]$'
+    ConstraintDescription: >-
+      Use 3-64 letters, numbers, dots, underscores, or hyphens; start and end
+      with a letter or number.
+    Description: >-
+      Physical name for a new create-only pilot stack. It must not already be
+      in use; this installer does not update or replace an existing instance.
+
+  CertificateMode:
+    Type: String
+    Default: letsencrypt-ip
+    AllowedValues:
+      - self-signed
+      - letsencrypt-ip
+    Description: >-
+      self-signed keeps the existing IP.sslip.io lab certificate. letsencrypt-ip
+      requests a short-lived public certificate for the attached static IPv4 and
+      installs a root-owned six-hour renewal check.
+
+  LetsEncryptTermsAccepted:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      Set true only after reviewing the current Let’s Encrypt Subscriber
+      Agreement at https://letsencrypt.org/repository/. It must be true for
+      letsencrypt-ip mode; no email address or secret is stored here.
+
+Rules:
+  SeoulRegionMustMatch:
+    Assertions:
+      - Assert: !Equals
+          - !Ref DeploymentRegion
+          - !Ref 'AWS::Region'
+        AssertDescription: >-
+          Open CloudFormation in Asia Pacific (Seoul), ap-northeast-2. Changing
+          the DeploymentRegion field does not change the console Region.
+
+  PublicCertificateTermsMustBeAccepted:
+    RuleCondition: !Equals [!Ref CertificateMode, letsencrypt-ip]
+    Assertions:
+      - Assert: !Equals [!Ref LetsEncryptTermsAccepted, 'true']
+        AssertDescription: >-
+          Review the current Let’s Encrypt Subscriber Agreement and explicitly
+          select true before using letsencrypt-ip certificate mode.
+
+Conditions:
+  PublicCertificateEnabled: !Equals [!Ref CertificateMode, letsencrypt-ip]
+
+# These sentinel values are replaced only by the release artifact builder.
+# The repository template is not a deployable URL; the published, checksummed
+# S3 object contains a real immutable commit and matching bootstrap checksum.
+Mappings:
+  ReleasePins:
+    Current:
+      ArtifactVersion: 'v0.1.4'
+
+Resources:
+  BootstrapWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  LightsailInstance:
+    Type: AWS::Lightsail::Instance
+    Properties:
+      InstanceName: !Ref InstanceName
+      AvailabilityZone: !Ref AvailabilityZone
+      BlueprintId: ubuntu_24_04
+      BundleId: medium_3_0
+      Networking:
+        Ports:
+          - FromPort: 80
+            ToPort: 80
+            Protocol: tcp
+            Cidrs:
+              - 0.0.0.0/0
+            Ipv6Cidrs:
+              - '::/0'
+          - FromPort: 443
+            ToPort: 443
+            Protocol: tcp
+            Cidrs:
+              - 0.0.0.0/0
+            Ipv6Cidrs:
+              - '::/0'
+          - FromPort: 22
+            ToPort: 22
+            Protocol: tcp
+            CidrListAliases:
+              - lightsail-connect
+      Tags:
+        - Key: Project
+          Value: qfieldcloud-self-hosting
+        - Key: DeploymentProfile
+          Value: lab-lightsail
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: CloudFormationStack
+          Value: !Ref 'AWS::StackName'
+      UserData: !Sub |
+        #!/bin/sh
+        # Lightsail prepends its own /bin/sh launch wrapper, so an inner Bash
+        # shebang is only a comment. Replace that wrapper explicitly and feed
+        # the verified bootstrap launcher to Bash on standard input.
+        umask 077
+        PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+        export PATH
+        exec /usr/bin/env bash -s -- <<'QFC_LIGHTSAIL_BASH_V1'
+        #!/usr/bin/env bash
+        set -Eeuo pipefail
+        set +x
+        umask 077
+
+        readonly state_dir='/var/lib/qfieldcloud-bootstrap'
+        readonly install_root='/opt/qfieldcloud'
+        readonly repository_url='https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta.git'
+        readonly revision='d00c5fa4581188299565938d8324103e740a6d9c'
+        readonly expected_sha256='66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c'
+        readonly raw_url='https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/d00c5fa4581188299565938d8324103e740a6d9c/scripts/lab-lightsail/bootstrap.sh'
+        readonly bootstrap_file="$state_dir/bootstrap.sh"
+        readonly bootstrap_log="$state_dir/bootstrap.log"
+        readonly bootstrap_timeout_seconds='6000'
+        readonly certificate_fingerprint_file="$install_root/state/certificate-sha256"
+        readonly health_check_file="$install_root/bin/health-check.sh"
+        IFS= read -r wait_handle <<'QFC_WAIT_HANDLE_V1'
+        ${BootstrapWaitHandle}
+        QFC_WAIT_HANDLE_V1
+        readonly wait_handle
+        download_path=''
+
+        signal_bootstrap() {
+          status="$1"
+          reason="$2"
+          data="$3"
+          if [ "$status" = 'SUCCESS' ]; then
+            if ! [[ "$data" =~ ^[0-9a-f]{64}$ ]]; then
+              return 1
+            fi
+          else
+            data='failed'
+          fi
+          if command -v curl >/dev/null 2>&1; then
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --retry 5 \
+              --retry-max-time 180 \
+              --retry-all-errors \
+              --request PUT \
+              --header 'Content-Type:' \
+              --data-binary "{\"Status\":\"$status\",\"Reason\":\"$reason\",\"UniqueId\":\"qfieldcloud-bootstrap\",\"Data\":\"$data\"}" \
+              "$wait_handle" >/dev/null 2>/dev/null; then
+              rm -f -- "$state_dir/SIGNAL_FAILED"
+              return 0
+            fi
+            if [ -d "$state_dir" ]; then
+              printf '%s\n' "$status" >"$state_dir/SIGNAL_FAILED"
+              chmod 0600 "$state_dir/SIGNAL_FAILED"
+            fi
+            return 1
+          fi
+          return 1
+        }
+
+        on_exit() {
+          rc=$?
+          trap - EXIT
+          set +e
+          if [ -n "$download_path" ]; then
+            rm -f -- "$download_path" >/dev/null 2>&1 || true
+          fi
+          if [ "$rc" -ne 0 ]; then
+            if command -v install >/dev/null 2>&1 &&
+               [ ! -L "$state_dir" ] &&
+               install -d -m 0700 "$state_dir" >/dev/null 2>&1; then
+              rm -f -- "$state_dir/SUCCESS" "$state_dir/FAILED" >/dev/null 2>&1 || true
+              if : >"$state_dir/FAILED"; then
+                chmod 0600 "$state_dir/FAILED" >/dev/null 2>&1 || true
+              fi
+            fi
+            printf '%s\n' 'QFieldCloud bootstrap failed; inspect the root-only local log.' >&2 || true
+            signal_bootstrap 'FAILURE' 'Verified bootstrap or validation failed.' 'failed' || true
+          fi
+          exit "$rc"
+        }
+        trap on_exit EXIT
+
+        if [ "$(id -u)" -ne 0 ]; then
+          printf '%s\n' 'QFieldCloud bootstrap must run as root.' >&2
+          exit 1
+        fi
+        for required_command in sleep stat timeout; do
+          if ! command -v "$required_command" >/dev/null 2>&1; then
+            printf 'Required bootstrap command is unavailable: %s\n' "$required_command" >&2
+            exit 1
+          fi
+        done
+
+        install -d -m 0700 "$state_dir" "$install_root"
+
+        if [ -f "$state_dir/SUCCESS" ] &&
+           grep -Fqx "revision=$revision" "$state_dir/SUCCESS" &&
+           grep -Fqx "bootstrap_sha256=$expected_sha256" "$state_dir/SUCCESS" &&
+           [ -f "$certificate_fingerprint_file" ]; then
+          certificate_sha256="$(cat "$certificate_fingerprint_file")"
+          if ! [[ "$certificate_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            printf '%s\n' 'The stored certificate fingerprint is invalid.' >&2
+            exit 1
+          fi
+          health_check_metadata="$(stat -c '%u:%g:%a' "$health_check_file" 2>/dev/null || true)"
+          if [ ! -f "$health_check_file" ] || [ -L "$health_check_file" ] ||
+             [ ! -x "$health_check_file" ] || [ "$health_check_metadata" != '0:0:700' ]; then
+            printf '%s\n' 'The installed health-check helper is missing or unsafe.' >&2
+            exit 1
+          fi
+          fast_path_health_ok='false'
+          fast_path_health_deadline=$((SECONDS + 600))
+          while ((SECONDS < fast_path_health_deadline)); do
+            fast_path_health_remaining=$((fast_path_health_deadline - SECONDS))
+            # Reserve the five-second forced-stop allowance inside the overall
+            # ten-minute retry deadline.
+            ((fast_path_health_remaining > 5)) || break
+            fast_path_health_timeout_seconds=30
+            if ((fast_path_health_remaining - 5 < fast_path_health_timeout_seconds)); then
+              fast_path_health_timeout_seconds=$((fast_path_health_remaining - 5))
+            fi
+            if QFC_INSTALL_ROOT="$install_root" \
+               timeout --signal=TERM --kill-after=5s "$fast_path_health_timeout_seconds"s \
+               "$health_check_file" >/dev/null 2>&1; then
+              fast_path_health_ok='true'
+              break
+            fi
+            fast_path_health_remaining=$((fast_path_health_deadline - SECONDS))
+            ((fast_path_health_remaining > 0)) || break
+            if ((fast_path_health_remaining < 10)); then
+              sleep "$fast_path_health_remaining"
+            else
+              sleep 10
+            fi
+          done
+          if [ "$fast_path_health_ok" != 'true' ]; then
+            printf '%s\n' 'The existing installation did not become healthy within 10 minutes; no success signal was sent.' >&2
+            exit 1
+          fi
+          printf '%s\n' 'The verified QFieldCloud bootstrap revision is already installed.'
+          signal_bootstrap 'SUCCESS' 'The requested verified bootstrap was already installed.' "$certificate_sha256"
+          trap - EXIT
+          exit 0
+        fi
+
+        export DEBIAN_FRONTEND=noninteractive
+        timeout --signal=TERM --kill-after=30s 420s \
+          apt-get update -qq
+        timeout --signal=TERM --kill-after=30s 420s \
+          apt-get install -y -qq --no-install-recommends ca-certificates curl
+
+        download_path="$(mktemp "$state_dir/bootstrap.download.XXXXXX")"
+        timeout --signal=TERM --kill-after=15s 180s curl \
+          --proto '=https' \
+          --tlsv1.2 \
+          --fail \
+          --silent \
+          --show-error \
+          --location \
+          --retry 5 \
+          --retry-all-errors \
+          --retry-max-time 120 \
+          --connect-timeout 15 \
+          --max-time 60 \
+          --output "$download_path" \
+          "$raw_url"
+
+        actual_sha256="$(sha256sum "$download_path" | awk '{print $1}')"
+        if [ "$actual_sha256" != "$expected_sha256" ]; then
+          printf '%s\n' 'Bootstrap SHA-256 verification failed; the file was not executed.' >&2
+          exit 1
+        fi
+
+        install -m 0700 "$download_path" "$bootstrap_file"
+        rm -f -- "$download_path"
+        download_path=''
+
+        if ! timeout --signal=TERM --kill-after=600s "$bootstrap_timeout_seconds" \
+          "$bootstrap_file" \
+          --repository-url "$repository_url" \
+          --revision "$revision" \
+          --install-root "$install_root" \
+          --certificate-mode '${CertificateMode}' \
+          </dev/null \
+          >"$bootstrap_log" 2>&1; then
+          printf '%s\n' 'Bootstrap execution failed, exceeded its 100-minute work limit, or could not finish shutdown within 10 minutes; inspect /var/lib/qfieldcloud-bootstrap/bootstrap.log as root.' >&2
+          exit 1
+        fi
+        chmod 0600 "$bootstrap_log"
+
+        certificate_sha256="$(cat "$certificate_fingerprint_file")"
+        if ! [[ "$certificate_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+          printf '%s\n' 'The bootstrap did not produce a valid certificate fingerprint.' >&2
+          exit 1
+        fi
+
+        {
+          printf 'revision=%s\n' "$revision"
+          printf 'bootstrap_sha256=%s\n' "$expected_sha256"
+        } >"$state_dir/SUCCESS"
+        chmod 0600 "$state_dir/SUCCESS"
+        rm -f -- "$state_dir/FAILED"
+        signal_bootstrap 'SUCCESS' 'Verified bootstrap and validation passed.' "$certificate_sha256"
+        trap - EXIT
+        printf '%s\n' 'Verified QFieldCloud bootstrap completed.'
+        QFC_LIGHTSAIL_BASH_V1
+        exit 127
+
+  StaticIp:
+    Type: AWS::Lightsail::StaticIp
+    DependsOn:
+      - LightsailInstance
+    Properties:
+      StaticIpName: !Sub '${InstanceName}-ip'
+      AttachedTo: !Ref InstanceName
+
+  BootstrapWaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn:
+      - StaticIp
+    Properties:
+      Count: 1
+      Handle: !Ref BootstrapWaitHandle
+      # Known launcher bounds total 7,905 seconds; 9,000 leaves more than
+      # 15 minutes for instance boot, local work, and the final signal.
+      Timeout: '9000'
+
+  StatusCheckFailedAlarm:
+    Type: AWS::Lightsail::Alarm
+    DependsOn:
+      - LightsailInstance
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-status-check-failed'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 2
+      EvaluationPeriods: 2
+      MetricName: StatusCheckFailed
+      MonitoredResourceName: !Ref InstanceName
+      NotificationEnabled: false
+      NotificationTriggers:
+        - ALARM
+      Threshold: 1
+      TreatMissingData: missing
+
+Outputs:
+  DeploymentProfile:
+    Description: Deployment profile created by this stack.
+    Value: lab-lightsail
+
+  DeployedRegion:
+    Description: AWS Region in which CloudFormation created the stack.
+    Value: !Ref 'AWS::Region'
+
+  InstanceName:
+    Description: Lightsail instance name.
+    Value: !Ref InstanceName
+
+  StaticIpv4Address:
+    Description: Public static IPv4 address attached to the instance.
+    Value: !GetAtt StaticIp.IpAddress
+
+  HttpUrl:
+    Description: >-
+      Public HTTP address. Only the ACME challenge path remains on HTTP; other
+      requests redirect to HTTPS. Self-signed mode uses third-party sslip.io.
+    Value: !If
+      - PublicCertificateEnabled
+      - !Sub
+        - 'http://${IpAddress}/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+      - !Sub
+        - 'http://${IpAddress}.sslip.io/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+
+  HttpsUrl:
+    Description: >-
+      Lab HTTPS URL. Public certificate mode uses the static IPv4 directly;
+      self-signed mode requires out-of-band fingerprint verification.
+    Value: !If
+      - PublicCertificateEnabled
+      - !Sub
+        - 'https://${IpAddress}/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+      - !Sub
+        - 'https://${IpAddress}.sslip.io/'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+
+  PilotHostName:
+    Description: Public lab hostname; no credential is included.
+    Value: !If
+      - PublicCertificateEnabled
+      - !GetAtt StaticIp.IpAddress
+      - !Sub
+        - '${IpAddress}.sslip.io'
+        - IpAddress: !GetAtt StaticIp.IpAddress
+
+  CertificateMode:
+    Description: Selected TLS certificate and renewal mode.
+    Value: !Ref CertificateMode
+
+  BootstrapRevision:
+    Description: Immutable public Git commit selected by the release Launch link.
+    Value: 'd00c5fa4581188299565938d8324103e740a6d9c'
+
+  BootstrapSha256:
+    Description: SHA-256 of the bootstrap file verified before execution.
+    Value: '66fe454dd7b8d85db24b6dc25b30941e4c0a03a735eccb2bf1c2035bf977727c'
+
+  BootstrapValidationData:
+    Description: >-
+      Authenticated CloudFormation wait-condition data. It maps the fixed
+      qfieldcloud-bootstrap signal ID to the initial validated TLS certificate
+      SHA-256. Public certificate renewal can legitimately change this value later.
+    Value: !GetAtt BootstrapWaitCondition.Data
+
+  BootstrapStatusFile:
+    Description: Root-only local marker to inspect after connecting to the instance.
+    Value: /var/lib/qfieldcloud-bootstrap/SUCCESS
+
+  StatusCheckAlarmArn:
+    Description: Lightsail StatusCheckFailed alarm ARN; notifications are disabled.
+    Value: !GetAtt StatusCheckFailedAlarm.AlarmArn
+
+  InstallationStatus:
+    Description: >-
+      If this stack is CREATE_COMPLETE, bootstrap, database migration, service
+      health checks, and the QGIS 3 worker smoke test all passed.
+    Value: installation-complete
+
+  AdministratorCredentials:
+    Description: >-
+      In Lightsail open this instance, choose Connect using SSH, and run the
+      shown command. It prints the secret only in that interactive browser terminal.
+    Value: sudo /opt/qfieldcloud/bin/show-admin-credentials.sh
+
+  DeleteInstructions:
+    Description: Browser-only removal guide pinned to the same installer commit.
+    Value: >-
+      https://github.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/blob/d00c5fa4581188299565938d8324103e740a6d9c/docs/runbooks/uninstall.md
+
+  ReleaseArtifactVersion:
+    Description: Immutable release artifact version used for this stack.
+    Value: !FindInMap [ReleasePins, Current, ArtifactVersion]
+
+  DataProtectionWarning:
+    Description: This pilot deliberately has no backup, restore job, or automatic snapshot.
+    Value: Deleting this stack or its Lightsail disk permanently loses all QFieldCloud data.

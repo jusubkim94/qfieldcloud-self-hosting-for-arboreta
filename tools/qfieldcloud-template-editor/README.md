@@ -8,7 +8,7 @@ Windows에서 AWS 자격증명이나 개발 도구 없이 `lab-lightsail` CloudF
 - 모든 YAML 내용을 바꿀 수 있는 고급 원문 편집기
 - 필수 CloudFormation 구조, 배포 자리표시자, Secret 패턴과 standalone 단일 node 계약 검사
 - QFieldCloud standalone 구조와 전체 설치 과정을 한국어 다이어그램으로 설명
-- 내장된 `v0.1.3` 템플릿 복원
+- 내장된 `v0.1.4` 템플릿 복원
 - 설치 실패 조사 시 CloudFormation의 성공 리소스 보존 옵션을 수동 선택해야 하는 이유 안내
 - AWS API, Access Key 또는 네트워크 호출 없음
 
@@ -22,7 +22,7 @@ Windows 10/11에 포함된 .NET Framework C# compiler를 사용하므로 NuGet p
 pwsh -NoProfile -File tools/qfieldcloud-template-editor/Build-QFieldCloudTemplateEditor.ps1
 ```
 
-결과는 `tools/qfieldcloud-template-editor/output/QFieldCloudTemplateEditor-v0.1.3.exe`에 생성됩니다. 빌드 스크립트는 GUI를 띄우지 않는 `--self-test`도 자동 실행합니다.
+결과는 `tools/qfieldcloud-template-editor/output/QFieldCloudTemplateEditor-v0.1.4.exe`에 생성됩니다. 빌드 스크립트는 GUI를 띄우지 않는 `--self-test`도 자동 실행합니다.
 
 ## 보안과 한계
 

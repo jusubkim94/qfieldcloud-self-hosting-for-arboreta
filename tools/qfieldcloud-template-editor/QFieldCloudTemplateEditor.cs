@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Offline GUI editor for the unofficial QFieldCloud lab-lightsail CloudFormation template")]
 [assembly: AssemblyCompany("qfieldcloud-self-hosting-for-arboreta contributors")]
 [assembly: AssemblyProduct("QFieldCloud Standalone Template Editor")]
-[assembly: AssemblyVersion("0.1.3.0")]
-[assembly: AssemblyFileVersion("0.1.3.0")]
+[assembly: AssemblyVersion("0.1.4.0")]
+[assembly: AssemblyFileVersion("0.1.4.0")]
 
 namespace QFieldCloudTemplateEditor
 {
@@ -50,8 +50,8 @@ namespace QFieldCloudTemplateEditor
             try
             {
                 string yaml = TemplateEngine.LoadEmbeddedTemplate();
-                List<ValidationIssue> before = TemplateEngine.Validate(yaml);
-                if (TemplateEngine.HasErrors(before)) return 11;
+                if (TemplateEngine.GetParameterDefault(yaml, "CertificateMode") != "letsencrypt-ip") return 11;
+                if (TemplateEngine.GetParameterDefault(yaml, "LetsEncryptTermsAccepted") != "false") return 16;
 
                 string edited = TemplateEngine.ApplyGuidedSettings(
                     yaml,
@@ -457,7 +457,7 @@ namespace QFieldCloudTemplateEditor
 
         public MainForm()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.3";
+            Text = "QFieldCloud Standalone Template Editor v0.1.4";
             Width = 1220;
             Height = 850;
             MinimumSize = new Size(980, 720);
@@ -474,7 +474,7 @@ namespace QFieldCloudTemplateEditor
             MainMenuStrip = (MenuStrip)Controls[Controls.Count - 2];
 
             string initial = TemplateEngine.LoadEmbeddedTemplate();
-            SetDocument(initial, "내장 검증본 v0.1.3", false);
+            SetDocument(initial, "내장 검증본 v0.1.4", false);
         }
 
         public void RenderTestScreenshots(string outputDirectory)
@@ -541,7 +541,7 @@ namespace QFieldCloudTemplateEditor
             tools.DropDownItems.Add("현재 YAML 검증", null, delegate { ValidateCurrent(true); });
             ToolStripMenuItem help = new ToolStripMenuItem("도움말(&H)");
             help.DropDownItems.Add("앱 정보", null, delegate { MessageBox.Show(this,
-                "QFieldCloud Standalone Template Editor v0.1.3\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
+                "QFieldCloud Standalone Template Editor v0.1.4\n\n비공식 로컬 편집 도구입니다. AWS API를 호출하지 않으며 실제 배포 성공을 보증하지 않습니다.\n코드 서명이 없으므로 Windows SmartScreen 경고가 나타날 수 있습니다.",
                 "앱 정보", MessageBoxButtons.OK, MessageBoxIcon.Information); });
             menu.Items.Add(file);
             menu.Items.Add(tools);
@@ -612,9 +612,9 @@ namespace QFieldCloudTemplateEditor
             certificateCombo.Items.Add("letsencrypt-ip");
             certificateCombo.SelectedIndexChanged += delegate { termsCheck.Enabled = certificateCombo.Text == "letsencrypt-ip"; };
             AddRow(table, "HTTPS 인증서", certificateCombo, "self-signed는 브라우저 경고가 보입니다. letsencrypt-ip는 공개 발급과 갱신 과정이 필요합니다.");
-            termsCheck.Text = "Let’s Encrypt Subscriber Agreement에 동의함";
+            termsCheck.Text = "현재 Let’s Encrypt Subscriber Agreement를 검토했으며 동의함";
             termsCheck.AutoSize = true;
-            AddRow(table, "이용약관 동의", termsCheck, "letsencrypt-ip를 선택한 경우에만 true로 설정하세요.");
+            AddRow(table, "이용약관 동의", termsCheck, "https://letsencrypt.org/repository/ 에서 현재 약관을 읽은 뒤 직접 선택하세요. 자동 동의되지 않습니다.");
 
             waitMinutes.Minimum = 132;
             waitMinutes.Maximum = 240;
@@ -1041,7 +1041,7 @@ namespace QFieldCloudTemplateEditor
         private void ResetToEmbedded()
         {
             if (!ConfirmDiscard()) return;
-            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.3", false);
+            SetDocument(TemplateEngine.LoadEmbeddedTemplate(), "내장 검증본 v0.1.4", false);
         }
 
         private bool ConfirmDiscard()
@@ -1057,7 +1057,7 @@ namespace QFieldCloudTemplateEditor
 
         private void UpdateTitle()
         {
-            Text = "QFieldCloud Standalone Template Editor v0.1.3" + (dirty ? " *" : "") + " — " + currentPath;
+            Text = "QFieldCloud Standalone Template Editor v0.1.4" + (dirty ? " *" : "") + " — " + currentPath;
         }
     }
 }
