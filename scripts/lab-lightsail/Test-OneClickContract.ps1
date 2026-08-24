@@ -42,6 +42,7 @@ $readmeText = Get-RepositoryText 'README.md'
 $releaseTemplatePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/template.yaml'
 $releaseManifestPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/manifest.json'
 $releaseChecksumsPath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/SHA256SUMS'
+$releaseArchivePath = Join-Path $script:repositoryRoot 'releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
 
 $removedPaths = @(
     'infra/lab-lightsail/access-bootstrap.yaml'
@@ -249,7 +250,7 @@ foreach ($markdownFile in $markdownFiles) {
     }
 }
 
-foreach ($releasePath in @($releaseTemplatePath, $releaseManifestPath, $releaseChecksumsPath)) {
+foreach ($releasePath in @($releaseTemplatePath, $releaseManifestPath, $releaseChecksumsPath, $releaseArchivePath)) {
     Assert-Contract (Test-Path -LiteralPath $releasePath -PathType Leaf) "Missing downloadable release file: $releasePath"
 }
 
@@ -257,12 +258,27 @@ $releaseTemplateText = Get-Content -Raw -LiteralPath $releaseTemplatePath
 $releaseManifest = Get-Content -Raw -LiteralPath $releaseManifestPath | ConvertFrom-Json
 $releaseChecksums = Get-Content -Raw -LiteralPath $releaseChecksumsPath
 $releaseTemplateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseTemplatePath).Hash.ToLowerInvariant()
+$releaseArchiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseArchivePath).Hash.ToLowerInvariant()
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$releaseArchive = [System.IO.Compression.ZipFile]::OpenRead($releaseArchivePath)
+try {
+    Assert-Contract (
+        $releaseArchive.Entries.Count -eq 1 -and
+        $releaseArchive.Entries[0].FullName -eq 'template.yaml' -and
+        $releaseArchive.Entries[0].Length -eq (Get-Item -LiteralPath $releaseTemplatePath).Length
+    ) 'The downloadable ZIP must contain only the complete template.yaml.'
+}
+finally {
+    $releaseArchive.Dispose()
+}
 Assert-Contract (
     $releaseManifest.release_version -eq 'v0.1.0' -and
     $releaseManifest.source_revision -eq '094c0662364ab96d6523bd1a2fbdf7e012d16948' -and
     $releaseManifest.template.sha256 -eq $releaseTemplateHash -and
     $releaseTemplateHash -eq '506c2c77bcd0c50907c28777151a7256f5541b45c4d66ec7cee0a5164e4fc539' -and
-    $releaseChecksums.Contains("$releaseTemplateHash  template.yaml")
+    $releaseChecksums.Contains("$releaseTemplateHash  template.yaml") -and
+    $releaseArchiveHash -eq 'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22' -and
+    $releaseChecksums.Contains("$releaseArchiveHash  qfieldcloud-lab-lightsail-v0.1.0.zip")
 ) 'The committed v0.1.0 release manifest or checksum does not match template.yaml.'
 Assert-Contract (
     -not $releaseTemplateText.Contains($zeroRevision) -and
@@ -272,7 +288,7 @@ Assert-Contract (
     $releaseTemplateText.Contains($releaseManifest.bootstrap.sha256)
 ) 'The downloadable release template still has placeholders or does not match its manifest.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/bda378da4c8829bb23196258f9ea3f6a17248ed1/releases/lab-lightsail/v0.1.0/template.yaml'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/e7b77390a0822415a96bc496aa841be352e5f3fa/releases/lab-lightsail/v0.1.0/qfieldcloud-lab-lightsail-v0.1.0.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
