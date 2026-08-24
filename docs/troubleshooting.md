@@ -8,7 +8,7 @@
 - 실패한 설치를 무작정 반복하지 않습니다. 같은 이름의 자원 충돌과 추가 비용이 생길 수 있습니다.
 - 이 파일럿에는 자동 스냅샷과 애플리케이션 백업이 없습니다. 삭제나 교체는 데이터를 영구 손실시킬 수 있습니다.
 
-> `v0.1.0` 완성 템플릿은 다운로드할 수 있지만 수동 업로드 전체 흐름은 실제 AWS에서 아직 종단 간 검증하지 않았습니다.
+> 2026-08-24 `v0.1.0` 수동 업로드 생성은 실제 AWS에서 `create_project` worker 검증까지 진행했으나 실패했습니다. 성공 종단 간 검증은 아직 완료하지 못했습니다.
 
 ## 설치 파일이 내려받아지지 않음
 
@@ -38,11 +38,15 @@
 
 ## 스택 생성 실패 또는 오래 멈춤
 
+다음 진단 배포부터는 스택 생성 전 **Configure stack options → Stack failure options → Preserve successfully provisioned resources**를 선택합니다. 이 선택은 YAML에서 자동 설정할 수 없습니다. 실패한 서버와 root 전용 진단 로그가 남는 대신 스택을 삭제할 때까지 비용이 계속 발생합니다.
+
 1. **CloudFormation → Stacks → qfieldcloud-pilot → Events**를 엽니다.
 2. 가장 최근 메시지만 보지 말고 처음 실패한 자원을 찾습니다.
 3. **Resources** 탭에서 실제로 생성된 자원을 확인합니다.
 4. **Lightsail → Instances**, **Networking → Static IPs**, **Alarms**에서도 잔존 자원을 확인합니다.
 5. 조사하지 않을 경우 [삭제 실행서](runbooks/uninstall.md)에 따라 제거합니다.
+
+worker 검증이 실패하면 설치기는 시험 프로젝트를 정리하기 전에 `/var/lib/qfieldcloud-bootstrap/diagnostics/worker-smoke-failure.*`에 Job feedback, 최근 app·worker wrapper 로그, 확인 가능한 QGIS 작업 컨테이너 상태, OOM 기록과 서버 용량을 자동 저장합니다. 정확한 경로는 `/var/lib/qfieldcloud-bootstrap/bootstrap.log`에도 기록됩니다. 확인 방법과 공유 전 가림 항목은 [로그 실행서](runbooks/logs.md)를 따릅니다.
 
 설치기는 완료 신호를 최대 약 150분 기다리도록 설계되어 있습니다. 브라우저를 닫았거나 CloudFormation이 실패했다고 해서 자원이 모두 사라졌다고 가정하지 않습니다. 남은 인스턴스는 월 **US$24**, 분리된 고정 IP는 시간당 **US$0.005** 비용이 발생할 수 있습니다.
 

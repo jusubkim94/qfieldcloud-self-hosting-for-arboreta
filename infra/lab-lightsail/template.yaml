@@ -5,7 +5,10 @@ Description: >-
   before tax and overage), a static IP, a restricted firewall, and one basic
   status alarm. THERE IS NO BACKUP OR SNAPSHOT: deleting the stack or server
   permanently loses its data. Use an MFA-protected AWS sign-in, never create a
-  root access key, and launch only a reviewed release-specific template.
+  root access key, and launch only a reviewed release-specific template. A
+  template cannot set CloudFormation's stack failure behavior: on the Configure
+  stack options page, select Preserve successfully provisioned resources when
+  the instance must remain available for failure diagnosis.
 
 Metadata:
   cfn-lint:
@@ -50,6 +53,7 @@ Metadata:
     - Public certificate mode exposes only the existing HTTP port 80 challenge path and stores ACME state root-only.
   CostAndDataWarnings:
     - This stack creates billable AWS resources. Delete the stack to stop instance charges.
+    - Preserving successfully provisioned resources is a create-stack operation option, not a YAML property; retained failure resources keep incurring charges until the stack is deleted.
     - Automatic snapshots and application backup or restore jobs are deliberately absent.
     - Deleting the stack, instance, or disk permanently loses all pilot data.
     - A failed stack can retain resources until rollback or deletion finishes; inspect both CloudFormation and Lightsail.

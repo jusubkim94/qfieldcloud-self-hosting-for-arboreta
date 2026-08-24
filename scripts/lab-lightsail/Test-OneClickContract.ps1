@@ -35,6 +35,7 @@ $script:repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $templateText = Get-RepositoryText 'infra/lab-lightsail/template.yaml'
 $bootstrapText = Get-RepositoryText 'scripts/lab-lightsail/bootstrap.sh'
 $healthText = Get-RepositoryText 'scripts/lab-lightsail/health-check.sh'
+$workerSmokeText = Get-RepositoryText 'scripts/lab-lightsail/worker-smoke-test.sh'
 $renewText = Get-RepositoryText 'scripts/lab-lightsail/certificate-renew.sh'
 $composeText = Get-RepositoryText 'runtime/lab-lightsail/compose.yaml'
 $versionText = Get-RepositoryText 'config/qfieldcloud-v26.25.env'
@@ -151,6 +152,33 @@ Assert-Contract (
     $bootstrapText.Contains('The complete service and worker validation gate failed.') -and
     $healthText.Contains('[[ $worker_validation == "passed" ]]')
 ) 'Bootstrap no longer gates completion on service and worker validation.'
+
+$workerCleanupBlock = [regex]::Match(
+    $workerSmokeText,
+    '(?ms)^cleanup\(\) \{(?<Body>.*?)(?=^\})'
+)
+Assert-Contract (
+    $workerCleanupBlock.Success -and
+    $workerSmokeText.Contains('preserve_worker_failure_diagnostics()') -and
+    $workerSmokeText.Contains('/var/lib/qfieldcloud-bootstrap') -and
+    $workerSmokeText.Contains('compose-app-worker.log') -and
+    $workerSmokeText.Contains('qgis-container-state.txt') -and
+    $workerSmokeText.Contains('kernel-oom.log') -and
+    $workerSmokeText.Contains('Worker failure summary:') -and
+    $workerSmokeText.Contains('Redact project names, URLs, addresses, email, and tokens before sharing these files.') -and
+    $workerCleanupBlock.Groups['Body'].Value.Contains('preserve_worker_failure_diagnostics') -and
+    $workerCleanupBlock.Groups['Body'].Value.Contains('cleanup_owned_smoke_project') -and
+    $workerCleanupBlock.Groups['Body'].Value.IndexOf('preserve_worker_failure_diagnostics', [StringComparison]::Ordinal) -lt
+        $workerCleanupBlock.Groups['Body'].Value.IndexOf('cleanup_owned_smoke_project', [StringComparison]::Ordinal)
+) 'Worker failure diagnostics are not captured root-only before smoke-project cleanup.'
+
+Assert-Contract (
+    $templateText.Contains("template cannot set CloudFormation's stack failure behavior") -and
+    $readmeText.Contains('Preserve successfully provisioned resources') -and
+    $readmeText.Contains('YAML 속성이 아니라 CloudFormation의 스택 생성 실행 옵션') -and
+    -not $templateText.Contains('OnFailure:') -and
+    -not $templateText.Contains('DisableRollback:')
+) 'The template or documentation misrepresents the create-stack failure-preservation option.'
 
 Assert-Contract (
     $renewText.Contains('CERTBOT_EXPECTED_VERSION') -and
@@ -293,7 +321,7 @@ Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
     $readmeText.Contains('```mermaid') -and
-    $readmeText.Contains('수동 파일 업로드 방식으로 실제 새 AWS 스택을 만들고 삭제하는 종단 간 시험은 아직 수행하지 않았습니다.') -and
+    $readmeText.Contains('create_project` worker 검증이 실패하여 스택이 롤백되었습니다.') -and
     -not [regex]::IsMatch($readmeText, '(?i)\]\(https://[^)]+cloudformation[^)]+templateURL=')
 ) 'README must expose the reviewed manual-download artifact and its manual CloudFormation upload flow.'
 

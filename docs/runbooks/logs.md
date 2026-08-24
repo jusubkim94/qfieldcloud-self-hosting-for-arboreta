@@ -45,6 +45,22 @@ CloudFormation 설치 자체가 실패했다면 다음 root 전용 로그의 마
 sudo tail -n 200 /var/lib/qfieldcloud-bootstrap/bootstrap.log
 ```
 
+worker smoke test가 실패하면 시험 프로젝트를 삭제하기 전에 다음 root 전용 자료를 자동 보존합니다.
+
+- `summary.txt`: 시각, 릴리스, 작업 종류와 ID
+- `job.json`: 제한된 Job output·feedback과 오류 분류
+- `compose-app-worker.log`: 최근 30분의 app·worker wrapper 마지막 400줄
+- `qgis-container-state.txt`, `qgis-container.log`: 정확히 일치하는 임시 QGIS 컨테이너가 아직 남아 있을 때만 생성
+- `host-capacity.txt`, `kernel-oom.log`: 메모리·디스크 상태와 OOM 강제 종료 흔적
+
+bootstrap 로그의 `Worker failure diagnostics saved in root-only directory:` 다음 경로를 확인합니다. 경로를 찾지 못하면 최신 항목 이름을 다음 파일에서 확인합니다.
+
+```bash
+sudo cat /var/lib/qfieldcloud-bootstrap/diagnostics/latest-worker-smoke-failure
+```
+
+표시된 이름이 정확히 `worker-smoke-failure.`로 시작하는지 확인한 뒤 해당 디렉터리의 `summary.txt`와 `job.json`부터 봅니다. 이 자동 보존은 서버 디스크 안에만 존재하므로 CloudFormation 실패 옵션에서 리소스 보존을 선택하지 않아 Lightsail이 롤백되면 로그도 함께 사라집니다.
+
 `letsencrypt-ip`의 최초 발급 또는 자동 갱신이 실패했다면 전체 ACME 상태를 복사하지 말고 다음 제한된 정보부터 봅니다.
 
 ```bash
