@@ -471,13 +471,21 @@ try {
     Assert-Contract ($publisherPlan.ExitCode -eq 0) (
         'Publisher plan-only mode failed when aws was absent from PATH.'
     )
+    # PowerShell's formatting width differs between local consoles and hosted
+    # CI. Join only indented continuation lines so long plan values keep the
+    # same semantic key/value record before applying the output contract.
+    $normalizedPublisherPlanOutput = [regex]::Replace(
+        $publisherPlan.Output,
+        '\r?\n[ \t]+(?=\S)',
+        ''
+    )
     Assert-Contract (
-        $publisherPlan.Output -match '(?m)^Action\s*:\s*plan-only\s*$' -and
-        $publisherPlan.Output -match '(?m)^AwsWriteRequested\s*:\s*False\s*$' -and
-        $publisherPlan.Output -match '(?m)^BucketCreation\s*:\s*never\s*$' -and
-        $publisherPlan.Output -match '(?m)^RequiredBucketVersioning\s*:\s*Enabled\s*$' -and
-        $publisherPlan.Output -match '(?m)^RequiredTemplateReadAccess\s*:\s*anonymous-s3:GetObjectVersion\s*$' -and
-        $publisherPlan.Output -match '(?m)^SourceReachabilityCheck\s*:\s*exact-GitHub-raw-bytes-before-any-AWS-write\s*$'
+        $normalizedPublisherPlanOutput -match '(?m)^Action\s*:\s*plan-only\s*$' -and
+        $normalizedPublisherPlanOutput -match '(?m)^AwsWriteRequested\s*:\s*False\s*$' -and
+        $normalizedPublisherPlanOutput -match '(?m)^BucketCreation\s*:\s*never\s*$' -and
+        $normalizedPublisherPlanOutput -match '(?m)^RequiredBucketVersioning\s*:\s*Enabled\s*$' -and
+        $normalizedPublisherPlanOutput -match '(?m)^RequiredTemplateReadAccess\s*:\s*anonymous-s3:GetObjectVersion\s*$' -and
+        $normalizedPublisherPlanOutput -match '(?m)^SourceReachabilityCheck\s*:\s*exact-GitHub-raw-bytes-before-any-AWS-write\s*$'
     ) 'Publisher did not report the required no-write, existing-versioned-bucket plan.'
 
     $publisherTokens = $null
