@@ -365,7 +365,7 @@ Assert-Contract (
         'b825bcad35871b4ee08321559e567ffa78807d5af2a19d9e3abca4f7a14e5f22'
 ) 'The immutable v0.1.0 release files changed unexpectedly.'
 
-$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/b8682771baf3e938f984690971deb4a0647d9b6b/releases/lab-lightsail/v0.1.2/qfieldcloud-lab-lightsail-v0.1.2.zip'
+$downloadUrl = 'https://raw.githubusercontent.com/jusubkim94/qfieldcloud-self-hosting-for-arboreta/ad3db49aa4242225b6b3fcd40b8f74e86579c6dc/releases/lab-lightsail/v0.1.3/qfieldcloud-lab-lightsail-v0.1.3.zip'
 Assert-Contract (
     $readmeText.Contains($downloadUrl) -and
     $readmeText.Contains('Upload a template file') -and
