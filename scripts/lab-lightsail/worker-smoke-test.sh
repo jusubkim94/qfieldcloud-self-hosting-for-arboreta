@@ -21,7 +21,7 @@ installer_revision_file="$install_root/state/installer-revision"
 smoke_status_file="$install_root/state/worker-smoke-status.json"
 smoke_owner_file="$install_root/state/worker-smoke-owned-project.json"
 smoke_project_name="installer-worker-smoke"
-smoke_description_prefix="qfc-installer-worker-smoke"
+smoke_description_prefix="qfc-worker-smoke"
 readonly default_api_timeout_seconds=60
 readonly job_poll_request_cap_seconds=20
 readonly job_poll_seconds=10
@@ -397,7 +397,7 @@ token_key = sys.stdin.read()
 deleted, _ = AuthToken.objects.filter(
     key=token_key,
     client_type=AuthToken.ClientType.CLI,
-    user_agent="qfc-installer-worker-smoke",
+    user_agent="qfc-worker-smoke",
 ).delete()
 raise SystemExit(0 if deleted == 1 else 3)
 '
@@ -706,12 +706,12 @@ user = get_user_model().objects.get(
 AuthToken.objects.filter(
     user=user,
     client_type=AuthToken.ClientType.CLI,
-    user_agent="qfc-installer-worker-smoke",
+    user_agent="qfc-worker-smoke",
 ).delete()
 token = AuthToken.objects.create(
     user=user,
     client_type=AuthToken.ClientType.CLI,
-    user_agent="qfc-installer-worker-smoke",
+    user_agent="qfc-worker-smoke",
     expires_at=timezone.now() + timedelta(hours=1),
 )
 print("QFC_SMOKE_TOKEN=" + token.key)

@@ -148,8 +148,6 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
     runtime/lab-lightsail/compose.yaml
     scripts/lab-lightsail/health-check.sh
     scripts/lab-lightsail/show-admin-credentials.sh
-    scripts/lab-lightsail/backup.sh
-    scripts/lab-lightsail/restore-test.sh
     scripts/lab-lightsail/worker-smoke-test.sh
     scripts/lab-lightsail/certificate-renew.sh
   )
@@ -168,8 +166,8 @@ if [[ -d $installer_root/.git ]] && [[ -f $installer_revision_file ]] && \
     live_files_match="false"
   fi
   if [[ $live_files_match == "true" ]]; then
-    for helper_name in health-check.sh show-admin-credentials.sh backup.sh \
-      restore-test.sh worker-smoke-test.sh certificate-renew.sh; do
+    for helper_name in health-check.sh show-admin-credentials.sh \
+      worker-smoke-test.sh certificate-renew.sh; do
       if ! cmp -s -- "$install_root/bin/$helper_name" \
         "$installer_root/scripts/lab-lightsail/$helper_name"; then
         live_files_match="false"
@@ -456,58 +454,6 @@ if jq -e 'type == "object"' >/dev/null 2>&1 <<<"$status_json"; then
   storage_state="$(jq -r '.storage // "missing"' <<<"$status_json")"
 fi
 
-recovery_validation="clear"
-recovery_required_file="$install_root/state/recovery-required"
-if [[ -e $recovery_required_file || -L $recovery_required_file ]]; then
-  if [[ -f $recovery_required_file && ! -L $recovery_required_file ]]; then
-    recovery_validation="required"
-  else
-    recovery_validation="invalid-marker"
-  fi
-fi
-
-maintenance_failure_state="clear"
-for maintenance_failure_file in \
-  "$install_root/state/last-backup-failure" \
-  "$install_root/state/last-restore-test-failure"; do
-  if [[ -e $maintenance_failure_file || -L $maintenance_failure_file ]]; then
-    if [[ -f $maintenance_failure_file && ! -L $maintenance_failure_file ]]; then
-      maintenance_failure_state="present"
-    else
-      maintenance_failure_state="invalid-marker"
-    fi
-    break
-  fi
-done
-
-restore_test_orphan_state="docker-unavailable"
-if [[ $docker_state == "running" ]]; then
-  orphan_containers=""
-  orphan_volumes=""
-  orphan_networks=""
-  if ! orphan_containers="$(
-    docker container ls --all \
-      --filter 'label=com.qfieldcloud.restore-test' \
-      --format '{{.Names}}'
-  )" \
-    || ! orphan_volumes="$(
-      docker volume ls \
-        --filter 'label=com.qfieldcloud.restore-test' \
-        --format '{{.Name}}'
-    )" \
-    || ! orphan_networks="$(
-      docker network ls \
-        --filter 'label=com.qfieldcloud.restore-test' \
-        --format '{{.Name}}'
-    )"; then
-    restore_test_orphan_state="enumeration-error"
-  elif [[ -n $orphan_containers || -n $orphan_volumes || -n $orphan_networks ]]; then
-    restore_test_orphan_state="present"
-  else
-    restore_test_orphan_state="clear"
-  fi
-fi
-
 service_health="error"
 bootstrap_state_allowed="false"
 if [[ $service_only == "true" ]] && \
@@ -531,175 +477,11 @@ if [[ $bootstrap_state_allowed == "true" && $docker_state == "running" && \
       $qgis3_state == "verified" && $proj_data_state == "installed-and-verified" && \
       $certificate_state =~ ^(current-hostname-and-fingerprint-matched|public-ca-ip-san-current)$ && \
       $certificate_renewal_state =~ ^(not-applicable-self-signed|scheduled-and-healthy)$ && \
-      $database_state == "ok" && $storage_state == "ok" && \
-      $restore_test_orphan_state == "clear" ]]; then
+      $database_state == "ok" && $storage_state == "ok" ]]; then
   service_health="ok"
 fi
 
 last_worker_smoke_at="not-run"
-last_backup_at="not-run"
-last_restore_test_at="not-run"
-latest_backup_name="not-run"
-restored_backup_name="not-run"
-backup_validation="not-run"
-backup_checksum_validation="not-run"
-restore_validation="not-run"
-restore_matches_latest="false"
-restore_checksum_set_validation="not-run"
-backup_checksum_set_sha256=""
-
-last_backup_path_file="$install_root/state/last-backup-path"
-last_backup_at_file="$install_root/state/last-backup-at"
-if [[ -f $last_backup_path_file && ! -L $last_backup_path_file && \
-      -f $last_backup_at_file && ! -L $last_backup_at_file ]]; then
-  latest_backup_path="$(<"$last_backup_path_file")"
-  last_backup_at="$(<"$last_backup_at_file")"
-  latest_backup_name="${latest_backup_path##*/}"
-  backup_validation="invalid"
-  backup_artifacts_valid="true"
-  backup_path_valid="false"
-  if [[ $latest_backup_path =~ ^/[A-Za-z0-9._/-]+$ ]] && \
-    [[ $latest_backup_path != *"//"* ]] && \
-    [[ $latest_backup_path != *"/./"* ]] && \
-    [[ $latest_backup_path != *"/../"* ]] && \
-    [[ -d $latest_backup_path && ! -L $latest_backup_path ]] && \
-    [[ -d $latest_backup_path/data && ! -L $latest_backup_path/data ]] && \
-    [[ -d $latest_backup_path/sensitive && ! -L $latest_backup_path/sensitive ]]; then
-    backup_path_valid="true"
-  fi
-  for backup_artifact in \
-    data/database.dump data/object-storage.tar.gz data/media.tar.gz \
-    sensitive/secrets.env versions.env compose.yaml public-host manifest.json SHA256SUMS; do
-    if [[ $backup_path_valid != "true" ]] || \
-      [[ ! -s $latest_backup_path/$backup_artifact ]] || \
-      [[ -L $latest_backup_path/$backup_artifact ]]; then
-      backup_artifacts_valid="false"
-      break
-    fi
-  done
-  if [[ $backup_path_valid == "true" ]] && \
-    [[ $latest_backup_name =~ ^[0-9]{8}T[0-9]{6}Z-v[0-9]+(\.[0-9]+)+$ ]] && \
-    [[ $last_backup_at =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] && \
-    [[ $backup_artifacts_valid == "true" ]] && \
-    [[ -f $latest_backup_path/manifest.json && ! -L $latest_backup_path/manifest.json ]] && \
-    jq -e \
-      --arg release "$QFIELDCLOUD_RELEASE" \
-      --arg commit "$QFIELDCLOUD_COMMIT" \
-      '.scope == "qfieldcloud-system-only" and .release == $release and
-       .upstream_commit == $commit and .off_instance_copy_created == false' \
-      "$latest_backup_path/manifest.json" >/dev/null 2>&1; then
-    backup_epoch="$(date --date="$last_backup_at" +%s 2>/dev/null || true)"
-    now_epoch="$(date -u +%s)"
-    if [[ $backup_epoch =~ ^[0-9]+$ ]] && ((now_epoch >= backup_epoch)) && \
-      ((now_epoch - backup_epoch <= 604800)); then
-      backup_validation="passed-local-only"
-    else
-      backup_validation="stale"
-    fi
-  fi
-
-  if [[ $service_only == "true" ]]; then
-    backup_checksum_validation="not-checked-service-only"
-  elif [[ $backup_validation == "passed-local-only" ]]; then
-    backup_checksum_validation="invalid"
-    checksums_file="$latest_backup_path/SHA256SUMS"
-    required_checksum_paths=(
-      data/database.dump
-      data/object-storage.tar.gz
-      data/media.tar.gz
-      sensitive/secrets.env
-      versions.env
-      compose.yaml
-      public-host
-      manifest.json
-    )
-    checksum_manifest_valid="true"
-    checksum_line_count=0
-    declare -A checksum_paths_seen=()
-    while IFS= read -r checksum_line || [[ -n $checksum_line ]]; do
-      ((checksum_line_count += 1))
-      if [[ ! $checksum_line =~ ^([0-9a-f]{64})\ \ (.+)$ ]]; then
-        checksum_manifest_valid="false"
-        continue
-      fi
-      checksum_relative_path="${BASH_REMATCH[2]}"
-      checksum_path_expected="false"
-      for required_checksum_path in "${required_checksum_paths[@]}"; do
-        if [[ $checksum_relative_path == "$required_checksum_path" ]]; then
-          checksum_path_expected="true"
-          break
-        fi
-      done
-      if [[ $checksum_path_expected != "true" ]] || \
-        [[ -n ${checksum_paths_seen[$checksum_relative_path]+present} ]]; then
-        checksum_manifest_valid="false"
-        continue
-      fi
-      checksum_paths_seen["$checksum_relative_path"]="true"
-    done <"$checksums_file"
-
-    if ((checksum_line_count != ${#required_checksum_paths[@]})); then
-      checksum_manifest_valid="false"
-    fi
-    for required_checksum_path in "${required_checksum_paths[@]}"; do
-      if [[ -z ${checksum_paths_seen[$required_checksum_path]+present} ]]; then
-        checksum_manifest_valid="false"
-        break
-      fi
-    done
-
-    checksum_set_before="$(sha256sum -- "$checksums_file" 2>/dev/null || true)"
-    checksum_set_before="${checksum_set_before%% *}"
-    if [[ $checksum_manifest_valid == "true" ]] && \
-      [[ $checksum_set_before =~ ^[0-9a-f]{64}$ ]] && \
-      (cd "$latest_backup_path" && \
-        sha256sum --check --strict -- SHA256SUMS >/dev/null 2>&1); then
-      checksum_set_after="$(sha256sum -- "$checksums_file" 2>/dev/null || true)"
-      checksum_set_after="${checksum_set_after%% *}"
-      if [[ $checksum_set_after =~ ^[0-9a-f]{64}$ ]] && \
-        [[ $checksum_set_after == "$checksum_set_before" ]]; then
-        backup_checksum_set_sha256="$checksum_set_after"
-        backup_checksum_validation="passed"
-      fi
-    fi
-  fi
-fi
-
-last_restore_at_file="$install_root/state/last-restore-test-at"
-last_restore_backup_file="$install_root/state/last-restore-test-backup"
-last_restore_checksum_file="$install_root/state/last-restore-test-checksum-set-sha256"
-if [[ -f $last_restore_at_file && ! -L $last_restore_at_file && \
-      -f $last_restore_backup_file && ! -L $last_restore_backup_file && \
-      -f $last_restore_checksum_file && ! -L $last_restore_checksum_file ]]; then
-  last_restore_test_at="$(<"$last_restore_at_file")"
-  restored_backup_name="$(<"$last_restore_backup_file")"
-  restored_checksum_set_sha256="$(<"$last_restore_checksum_file")"
-  restore_validation="invalid"
-  restore_checksum_set_validation="invalid"
-  if [[ $backup_checksum_validation == "passed" ]] && \
-    [[ $restored_checksum_set_sha256 =~ ^[0-9a-f]{64}$ ]] && \
-    [[ $restored_checksum_set_sha256 == "$backup_checksum_set_sha256" ]]; then
-    restore_checksum_set_validation="matched"
-  fi
-  if [[ $last_restore_test_at =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] && \
-    [[ $restored_backup_name =~ ^[0-9]{8}T[0-9]{6}Z-v[0-9]+(\.[0-9]+)+$ ]] && \
-    [[ $backup_validation == "passed-local-only" ]] && \
-    [[ $backup_checksum_validation == "passed" ]] && \
-    [[ $restore_checksum_set_validation == "matched" ]] && \
-    [[ $restored_backup_name == "$latest_backup_name" ]]; then
-    restore_epoch="$(date --date="$last_restore_test_at" +%s 2>/dev/null || true)"
-    now_epoch="$(date -u +%s)"
-    if [[ $restore_epoch =~ ^[0-9]+$ ]] && ((now_epoch >= restore_epoch)) && \
-      ((now_epoch - restore_epoch <= 604800)) && \
-      [[ $backup_epoch =~ ^[0-9]+$ ]] && ((restore_epoch >= backup_epoch)); then
-      restore_validation="schema-storage-integrity-passed"
-      restore_matches_latest="true"
-    else
-      restore_validation="stale"
-    fi
-  fi
-fi
-
 worker_validation="not-run"
 smoke_status_file="$install_root/state/worker-smoke-status.json"
 if [[ -f $smoke_status_file ]]; then
@@ -768,13 +550,7 @@ overall="error"
 if [[ $service_health == "ok" ]] && [[ $service_only == "true" ]]; then
   overall="ok"
 elif [[ $service_health == "ok" ]] && \
-  [[ $recovery_validation == "clear" ]] && \
-  [[ $maintenance_failure_state == "clear" ]] && \
   [[ $worker_validation == "passed" ]] && \
-  [[ $backup_validation == "passed-local-only" ]] && \
-  [[ $backup_checksum_validation == "passed" ]] && \
-  [[ $restore_validation == "schema-storage-integrity-passed" ]] && \
-  [[ $restore_matches_latest == "true" ]] && \
   { [[ $installation_gate == "true" ]] || [[ $installation_validation == "complete" ]]; }; then
   overall="ok"
 fi
@@ -812,20 +588,8 @@ jq -cn \
   --arg certificate_last_renewal_at "$last_certificate_renewal_at" \
   --arg database "$database_state" \
   --arg storage "$storage_state" \
-  --arg recovery_validation "$recovery_validation" \
-  --arg maintenance_failures "$maintenance_failure_state" \
-  --arg restore_test_orphans "$restore_test_orphan_state" \
   --arg worker_smoke_at "$last_worker_smoke_at" \
   --arg worker_validation "$worker_validation" \
-  --arg backup_validation "$backup_validation" \
-  --arg backup_checksum_validation "$backup_checksum_validation" \
-  --arg latest_backup_name "$latest_backup_name" \
-  --arg backup_at "$last_backup_at" \
-  --arg restore_validation "$restore_validation" \
-  --arg restore_checksum_set_validation "$restore_checksum_set_validation" \
-  --arg restored_backup_name "$restored_backup_name" \
-  --arg restore_matches_latest "$restore_matches_latest" \
-  --arg restore_test_at "$last_restore_test_at" \
   '{
     overall: $overall,
     health_mode: $health_mode,
@@ -859,20 +623,8 @@ jq -cn \
     certificate_last_renewal_at: $certificate_last_renewal_at,
     database: $database,
     storage: $storage,
-    recovery_validation: $recovery_validation,
-    maintenance_failures: $maintenance_failures,
-    restore_test_orphans: $restore_test_orphans,
     worker_validation: $worker_validation,
-    last_worker_smoke_at: $worker_smoke_at,
-    backup_validation: $backup_validation,
-    backup_checksum_validation: $backup_checksum_validation,
-    latest_backup_name: $latest_backup_name,
-    last_backup_at: $backup_at,
-    restore_validation: $restore_validation,
-    restore_checksum_set_validation: $restore_checksum_set_validation,
-    restored_backup_name: $restored_backup_name,
-    restore_matches_latest: ($restore_matches_latest == "true"),
-    last_restore_test_at: $restore_test_at
+    last_worker_smoke_at: $worker_smoke_at
   }'
 
 [[ $overall == "ok" ]]
